@@ -31,7 +31,6 @@ from govcon.models.enums import (
     ContractorSize,
     CostElement,
     CostType,
-    DetectionMethod,
     PeriodStatus,
     PoolName,
     PoolStatus,
@@ -148,13 +147,16 @@ def fringe_pool() -> IndirectPool:
     )
 
 
-def entertainment_category() -> UnallowableCostCategory:
-    return UnallowableCostCategory(
-        far_citation="31.205-14",
-        category_name="Entertainment & Recreation",
-        trap_logic_description="Keyword/category flag (tickets, parties, golf, social events)",
-        detection_method=DetectionMethod.KEYWORD_PATTERN,
-    )
+def seeded_category(session: Session, far_citation: str) -> UnallowableCostCategory:
+    """Look up a migration-seeded FAR 31.205 category (migration 0003) —
+    fixtures must reference the seeded rows, never create duplicates."""
+    import sqlalchemy as sa
+
+    return session.execute(
+        sa.select(UnallowableCostCategory).where(
+            UnallowableCostCategory.far_citation == far_citation
+        )
+    ).scalar_one()
 
 
 def executive() -> Person:
@@ -172,6 +174,47 @@ class SeededData:
         self.__dict__.update(kw)
 
 
+# --- Phase 2 builders (used by phase-2 tests on top of seed_all) -----------
+
+
+def ga_pool() -> IndirectPool:
+    return IndirectPool(
+        pool_name=PoolName.GA,
+        fiscal_year=2026,
+        rate_type=RateType.PROVISIONAL,
+        status=PoolStatus.APPROVED,
+        allocation_base_amount=Decimal("500000.00"),
+    )
+
+
+def per_diem_rate_seattle() -> "GSAPerDiemRate":
+    from govcon.models import GSAPerDiemRate
+
+    return GSAPerDiemRate(
+        location="Seattle, WA",
+        lodging_rate=Decimal("199.00"),
+        meals_incidentals_rate=Decimal("79.00"),
+        effective_start_date=datetime.date(2026, 6, 1),
+        effective_end_date=datetime.date(2026, 6, 30),
+    )
+
+
+def synthetic_exec_comp_cap() -> "RegulatoryThreshold":
+    """CLEARLY-SYNTHETIC cap row for tests only. The real statutory value is
+    not in the verified regulatory reference, so production seeds none —
+    never promote this number anywhere (see services/compensation.py)."""
+    from govcon.models import RegulatoryThreshold
+    from govcon.models.enums import ThresholdStatus
+
+    return RegulatoryThreshold(
+        rule_name="EXEC_COMP_CAP",
+        value=Decimal("500000.00"),
+        effective_date=datetime.date(2026, 1, 1),
+        status=ThresholdStatus.STATUTE,
+        source_citation="SYNTHETIC TEST FIXTURE — not a verified statutory cap value",
+    )
+
+
 def seed_all(session: Session) -> SeededData:
     """Seed the full deterministic matrix and return handles."""
     contracts = {
@@ -184,14 +227,14 @@ def seed_all(session: Session) -> SeededData:
     period_open = open_period()
     period_closed = closed_period()
     pool = fringe_pool()
-    category = entertainment_category()
     exec_person = executive()
     staff_person = staffer()
 
     session.add_all(
-        [*contracts.values(), period_open, period_closed, pool, category, exec_person, staff_person]
+        [*contracts.values(), period_open, period_closed, pool, exec_person, staff_person]
     )
     session.flush()
+    category = seeded_category(session, "31.205-14")  # from migration 0003
 
     acct_direct_labor = GLAccount(
         account_code="5000",

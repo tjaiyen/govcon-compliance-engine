@@ -3,6 +3,7 @@ govcon.db.base.Base.metadata (Alembic's target_metadata)."""
 
 from govcon.models.audit_trail import AuditTrail
 from govcon.models.contracts import CONTRACT_FROZEN_COLUMNS, Contract, ContractAction
+from govcon.models.exceptions_ref import ContractClauseException, GSAPerDiemRate
 from govcon.models.ledger import GLAccount, GLTransaction, JCLEntry
 from govcon.models.periods import Period
 from govcon.models.pools import IndirectPool
@@ -18,7 +19,9 @@ __all__ = [
     "CONTRACT_FROZEN_COLUMNS",
     "Contract",
     "ContractAction",
+    "ContractClauseException",
     "ForwardPricingRateAgreement",
+    "GSAPerDiemRate",
     "GLAccount",
     "GLTransaction",
     "JCLEntry",

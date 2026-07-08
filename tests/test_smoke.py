@@ -13,7 +13,7 @@ def test_package_imports():
     assert govcon.__version__
     from govcon.db.base import Base
 
-    assert len(Base.metadata.tables) == 12
+    assert len(Base.metadata.tables) == 14  # 12 Phase 1 + 2 Phase 2
 
 
 def test_migrated_db_connects_and_has_tables(engine):
