@@ -7,6 +7,7 @@ from govcon.models.exceptions_ref import ContractClauseException, GSAPerDiemRate
 from govcon.models.ledger import GLAccount, GLTransaction, JCLEntry
 from govcon.models.periods import Period
 from govcon.models.pools import IndirectPool
+from govcon.models.practices import CostAccountingPractice, PracticeChangeEvent
 from govcon.models.reference import (
     ForwardPricingRateAgreement,
     Person,
@@ -20,8 +21,10 @@ __all__ = [
     "Contract",
     "ContractAction",
     "ContractClauseException",
+    "CostAccountingPractice",
     "ForwardPricingRateAgreement",
     "GSAPerDiemRate",
+    "PracticeChangeEvent",
     "GLAccount",
     "GLTransaction",
     "JCLEntry",
