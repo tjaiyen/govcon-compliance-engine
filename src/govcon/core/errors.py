@@ -32,3 +32,9 @@ class ClosedPeriodError(GovconError):
 class DirectCostWithoutContractError(GovconError):
     """A transaction on a direct-cost account has no contract_id
     (SF 1408 criterion B, enforced at the edge)."""
+
+
+class RateCalculationError(GovconError):
+    """A rate calculation precondition failed — e.g. a missing or
+    non-positive allocation base (SF 1408 criterion C: fail loudly, never
+    divide by zero or silently skip the pool)."""

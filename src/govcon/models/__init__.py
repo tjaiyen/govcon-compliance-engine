@@ -8,6 +8,7 @@ from govcon.models.ledger import GLAccount, GLTransaction, JCLEntry
 from govcon.models.periods import Period
 from govcon.models.pools import IndirectPool
 from govcon.models.practices import CostAccountingPractice, PracticeChangeEvent
+from govcon.models.rate_runs import RateCalculationRun, RateTrueUp
 from govcon.models.reference import (
     ForwardPricingRateAgreement,
     Person,
@@ -31,6 +32,8 @@ __all__ = [
     "IndirectPool",
     "Period",
     "Person",
+    "RateCalculationRun",
+    "RateTrueUp",
     "RegulatoryThreshold",
     "UnallowableCostCategory",
 ]
