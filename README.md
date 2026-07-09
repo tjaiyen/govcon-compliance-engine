@@ -34,23 +34,23 @@ legal judgment. Run `govcon about` for the tool's own limitations statement.
    `decimal.Decimal` lossless on SQLite (plain NUMERIC round-trips through
    float); floats are rejected at bind time.
 
-The authoritative spec lives in the Obsidian vault
-`~/Obsidian/TJ_Vault/govcon-compliance-engine/02 - Context/` (read
-`00_HANDOFF_BUILD_SPEC.md` first). This repo deliberately lives OFF-vault.
+This engine was built **spec-first**: the regulatory reference, data model, and
+phased build plan were authored as a private design vault, and each phase was
+implemented, tested, and stress-tested against it. That spec is not included in
+this repository; the code, its tests, and this README are the artifact.
 
 ## Quick start
 
 ```sh
 uv sync
-uv run pytest                      # 160+ tests, one per business rule minimum
+uv run pytest                      # 170+ tests, one per business rule minimum
 uv run python scripts/demo.py      # end-to-end synthetic world → demo_out/
 ```
 
 The demo migrates a fresh `demo.db`, posts costs through the real write path
 (allowability vectors stamped at capture), derives a fringe rate from the
 ledger, closes the period through the gated three-way reconciliation,
-generates Schedules G/H/I/N, and renders them to markdown (and an
-audit-report note into the Obsidian vault when present).
+generates Schedules G/H/I/N, and renders them to markdown under `demo_out/`.
 
 ## Command tour
 

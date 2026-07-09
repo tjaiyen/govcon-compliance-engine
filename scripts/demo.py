@@ -2,10 +2,10 @@
 
 Run:  uv run python scripts/demo.py
 Creates demo.db (gitignored), migrates it, seeds a readable scenario,
-closes the period, generates Schedules G/H/I/N, exports markdown to
-demo_out/ (gitignored), and — the render-into-vault direction — writes one
-audit-report note into the Obsidian vault's `01 - Notes/` (skipped cleanly
-if the vault isn't present on this machine).
+closes the period, generates Schedules G/H/I/N, and exports markdown to
+demo_out/ (gitignored). If the GOVCON_VAULT_NOTES env var points at a
+directory, it also renders one audit-report note there (the author uses a
+local Obsidian vault); otherwise that step is skipped cleanly.
 
 SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE. Every figure below is
 invented.
@@ -23,7 +23,11 @@ from decimal import Decimal
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DB = ROOT / "demo.db"
 OUT = ROOT / "demo_out"
-VAULT_NOTES = pathlib.Path.home() / "Obsidian/TJ_Vault/govcon-compliance-engine/01 - Notes"
+# Optional render-into-vault target (author's local Obsidian vault). Set
+# GOVCON_VAULT_NOTES to a directory to enable; unset = skip that step.
+VAULT_NOTES = pathlib.Path(os.environ["GOVCON_VAULT_NOTES"]) if os.environ.get(
+    "GOVCON_VAULT_NOTES"
+) else None
 
 os.environ["GOVCON_DB_URL"] = f"sqlite:///{DB}"
 D = datetime.date
@@ -167,8 +171,8 @@ def main() -> None:
         g = schedules[ScheduleType.G]
         fringe_rate = fringe.calculated_rate
 
-        # --- render INTO the vault (B41), if it exists ----------------------
-        if VAULT_NOTES.is_dir():
+        # --- optional: render an audit-report note into a local vault -------
+        if VAULT_NOTES is not None and VAULT_NOTES.is_dir():
             today = datetime.date.today().isoformat()
             status = "compliant" if g.reconciliation_status.value == "passed" else "flagged"
             note = VAULT_NOTES / f"{today} - Audit Report - demo-contract-{contract.contract_id}.md"
@@ -220,7 +224,7 @@ schedule JSON in ice_schedules.content; markdown renders in demo_out/.
 """, encoding="utf-8")
             print(f"wrote vault note: {note.name}")
         else:
-            print("vault not present — skipped the vault audit-report note")
+            print("GOVCON_VAULT_NOTES not set / not a directory — skipped the vault note")
 
     print("\nDemo complete. Explore:")
     print("  GOVCON_DB_URL=sqlite:///demo.db uv run govcon sf1408")
