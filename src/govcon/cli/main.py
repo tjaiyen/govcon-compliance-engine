@@ -30,6 +30,37 @@ def version() -> None:
     typer.echo(f"govcon-engine {__version__} (synthetic data only)")
 
 
+@app.command()
+def about() -> None:
+    """Explain this tool's own limitations (SoD, design-vs-operation,
+    not-a-certification) — the handoff spec §4 requirement."""
+    from govcon.services.sf1408 import explain_limitations
+
+    typer.echo(explain_limitations())
+
+
+@app.command()
+def sf1408() -> None:
+    """Run the SF 1408 six-criteria structural self-check against the
+    current database state; exit 1 on any failed criterion."""
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.services.sf1408 import run_self_check
+
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        results = run_self_check(session)
+    failed = False
+    for r in results:
+        mark = "PASS" if r.passed else "FAIL"
+        typer.echo(f"[{mark}] {r.criterion} — {r.name}")
+        for finding in r.findings:
+            typer.echo(f"       - {finding}")
+        failed = failed or not r.passed
+    typer.echo("SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE")
+    if failed:
+        raise typer.Exit(code=1)
+
+
 @db_app.command("upgrade")
 def db_upgrade() -> None:
     """Run alembic upgrade head against GOVCON_DB_URL."""
