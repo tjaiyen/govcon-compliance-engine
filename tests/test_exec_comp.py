@@ -33,6 +33,7 @@ def _comp_setup(session, data):
         account_name="Executive Compensation",
         cost_type=CostType.INDIRECT,
         pool_assignment=gapool.pool_id,
+        is_compensation=True,  # only flagged accounts count toward YTD comp
     )
     unallowable_account = GLAccount(
         account_code="7920",

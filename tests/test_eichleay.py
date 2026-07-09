@@ -22,7 +22,7 @@ def _setup(session, data, *, close=True):
     contract bills $800,000 (total company $1,000,000), all tied GL=JCL so
     the period closes cleanly. Performance 2026-01-01..2026-10-27 = 300
     days inclusive."""
-    from govcon.models import GLTransaction, JCLEntry
+    from govcon.models import JCLEntry
 
     delayed = Contract(
         agency_type=AgencyType.DOD,

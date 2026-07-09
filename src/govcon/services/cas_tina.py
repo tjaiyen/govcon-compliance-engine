@@ -180,11 +180,15 @@ def determine_tina_applicability(
         return result
 
     value = Decimal(action.proposed_value)
-    if value < row.value:
+    # TINA requires certified data only when the price EXCEEDS the threshold
+    # (FAR 15.403-4 / 10 U.S.C. 3702) — an action exactly AT the threshold is
+    # not required (a stress test found the boundary was inclusive-wrong; the
+    # REA/CDA ABS-magnitude test at rea_cda.py already uses the correct `>`).
+    if value <= row.value:
         result.certification_required = False
         result.reasons.append(
-            f"action value {value} below the {row.value} TINA threshold in force on "
-            f"{action.action_date.isoformat()}: certified cost-or-pricing data not required"
+            f"action value {value} at or below the {row.value} TINA threshold in force "
+            f"on {action.action_date.isoformat()}: certified cost-or-pricing data not required"
         )
         return result
 

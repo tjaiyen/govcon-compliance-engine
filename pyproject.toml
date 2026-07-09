@@ -27,3 +27,23 @@ packages = ["src/govcon"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "E501",   # line length is advisory here; SafeNumeric comments run long
+    "B008",   # Typer's `= typer.Option(...)` in defaults is the idiomatic pattern
+    "E741",   # ICE Schedule enum members really are named I and O (FAR schedule letters)
+    "UP042",  # str+Enum is deliberate (JSON-serializable .value); StrEnum migration out of scope
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: forward-ref annotations on fixture builders (class imported in-body),
+# throwaway locals in worked-example setups, and zip() over equal-length
+# seed/db row lists are acceptable in test code.
+"tests/*" = ["F821", "F841", "B905"]

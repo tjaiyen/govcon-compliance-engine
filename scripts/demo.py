@@ -14,7 +14,6 @@ invented.
 from __future__ import annotations
 
 import datetime
-import json
 import os
 import pathlib
 import subprocess
@@ -41,12 +40,25 @@ def main() -> None:
 
     from govcon.db.engine import make_engine, make_session_factory
     from govcon.models import (
-        Contract, GLAccount, IndirectPool, JCLEntry, Period, Person, Voucher,
+        Contract,
+        GLAccount,
+        IndirectPool,
+        JCLEntry,
+        Period,
+        Person,
+        Voucher,
     )
     from govcon.models.billing import ScheduleType, SignerRole
     from govcon.models.enums import (
-        AgencyType, CASCoverageType, ContractorSize, CostElement, CostType,
-        PeriodStatus, PoolName, PoolStatus, RateType,
+        AgencyType,
+        CASCoverageType,
+        ContractorSize,
+        CostElement,
+        CostType,
+        PeriodStatus,
+        PoolName,
+        PoolStatus,
+        RateType,
     )
     from govcon.services.allowability import post_transaction
     from govcon.services.cas_tina import determine_cas_coverage
@@ -141,12 +153,13 @@ def main() -> None:
 
         for stype, row in schedules.items():
             path = OUT / f"schedule_{stype.value}_FY2026.md"
-            path.write_text(render_schedule(row))
+            path.write_text(render_schedule(row), encoding="utf-8")
             print(f"wrote {path.relative_to(ROOT)}")
 
         statement = contract_statement(session, contract)
         (OUT / "contract_statement.md").write_text(
-            render_markdown(f"Contract {contract.contract_id} — Financial Statement", statement)
+            render_markdown(f"Contract {contract.contract_id} — Financial Statement", statement),
+            encoding="utf-8",
         )
         print("wrote demo_out/contract_statement.md")
 
@@ -204,7 +217,7 @@ None — demo data.
 
 Full hash-chained audit trail in demo.db (`uv run govcon audit verify`);
 schedule JSON in ice_schedules.content; markdown renders in demo_out/.
-""")
+""", encoding="utf-8")
             print(f"wrote vault note: {note.name}")
         else:
             print("vault not present — skipped the vault audit-report note")

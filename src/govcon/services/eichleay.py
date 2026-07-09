@@ -40,10 +40,24 @@ class EichleayError(GovconError):
     pass
 
 
-def _billings(session: Session, contract_id: int | None = None) -> Decimal:
+def _billings(
+    session: Session,
+    contract_id: int | None = None,
+    *,
+    window: tuple[datetime.date, datetime.date] | None = None,
+) -> Decimal:
+    """Sum billings, optionally within a [start, end] billing-date window.
+
+    Eichleay Step 1 allocates over billings DURING the contract performance
+    period (a stress test found the window was missing — out-of-period
+    vouchers were diluting/inflating the allocation share)."""
     stmt = sa.select(Voucher.amount_billed)
     if contract_id is not None:
         stmt = stmt.where(Voucher.contract_id == contract_id)
+    if window is not None:
+        stmt = stmt.where(Voucher.billing_date >= window[0]).where(
+            Voucher.billing_date <= window[1]
+        )
     return sum(
         (Decimal(a) for a in session.execute(stmt).scalars()), Decimal("0.00")
     )
@@ -89,8 +103,9 @@ def calculate_eichleay(
         )
     _check_inputs_reconciled(session)
 
-    contract_billings = _billings(session, contract.contract_id)
-    total_billings = _billings(session)
+    window = (contract.performance_start_date, contract.performance_end_date)
+    contract_billings = _billings(session, contract.contract_id, window=window)
+    total_billings = _billings(session, window=window)
     if total_billings <= 0:
         raise EichleayError("total company billings are zero — nothing to allocate")
 

@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 import sqlalchemy as sa
 
-from govcon.models import TINABaseline, TINABaselineAssumption, TINASweepFinding
+from govcon.models import TINABaseline, TINABaselineAssumption
 from govcon.models.tina import AssumptionType, CertificationStatus, SweepStatus
 from govcon.services.allowability import post_transaction
 from govcon.services.tina_sweep import (

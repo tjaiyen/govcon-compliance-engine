@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import sqlalchemy as sa
 
-from govcon.models import IndirectPool, Period, Voucher
-from govcon.models.enums import PeriodStatus, PoolName, PoolStatus, RateType, ReconciliationStatus
+from govcon.models import Period, Voucher
+from govcon.models.enums import PeriodStatus, ReconciliationStatus
 from govcon.services.sf1408 import explain_limitations, run_self_check
 from tests.fixtures.synthetic_data import seed_all
 

@@ -81,7 +81,7 @@ def export(
             return
         rendered = render_schedule(row)
     if out:
-        with open(out, "w") as fh:
+        with open(out, "w", encoding="utf-8") as fh:
             fh.write(rendered)
         typer.echo(f"wrote {out}")
     else:
@@ -109,7 +109,7 @@ def contract(
         statement = contract_statement(session, row)
     rendered = render_markdown(f"Contract {contract_id} — Financial Statement", statement)
     if out:
-        with open(out, "w") as fh:
+        with open(out, "w", encoding="utf-8") as fh:
             fh.write(rendered)
         typer.echo(f"wrote {out}")
     else:
@@ -117,9 +117,18 @@ def contract(
 
 
 @app.command()
-def reverify() -> None:
+def reverify(
+    strict: bool = typer.Option(
+        False, help="Exit 1 when any checkpoint is due (for scripting/CI); "
+        "off by default so the reminder list never blocks."
+    ),
+) -> None:
     """List regulatory re-verification items (date checkpoints + every
-    non-final threshold row); exit 1 when a date checkpoint has passed."""
+    non-final threshold row). This is a REMINDER surface: it exits 0 by
+    default (a passed checkpoint is a standing reminder, not a failure —
+    a stress test found the old behavior exited 1 forever after the
+    checkpoint dates, which would break any recurring demo). Use --strict
+    to get exit 1 when items are due."""
     import datetime
 
     from govcon.db.engine import make_engine, make_session_factory
@@ -136,7 +145,8 @@ def reverify() -> None:
     if any_due:
         typer.echo("re-verification due — check primary sources and land a new "
                    "threshold migration if anything moved", err=True)
-        raise typer.Exit(code=1)
+        if strict:
+            raise typer.Exit(code=1)
 
 
 @app.command()

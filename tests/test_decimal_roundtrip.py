@@ -28,7 +28,7 @@ def test_money_roundtrips_exactly(session):
 
 
 def test_float_is_rejected_at_bind_time(session):
-    from govcon.models import Period, GLTransaction
+    from govcon.models import GLTransaction
     from tests.fixtures.synthetic_data import seed_all
 
     data = seed_all(session)

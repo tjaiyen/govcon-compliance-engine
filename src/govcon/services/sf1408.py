@@ -19,7 +19,6 @@ This demonstrates understanding of the criteria; it is NOT a certification
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -162,9 +161,29 @@ def _check_f(session: Session) -> CriterionResult:
 CHECKS = (_check_a, _check_b, _check_c, _check_d, _check_e, _check_f)
 
 
+def has_data(session: Session) -> bool:
+    """True if there is anything to check — an empty DB passes every
+    criterion vacuously, which a stress test flagged as misleading
+    ('compliant' when nothing has been audited)."""
+    accounts = session.execute(sa.select(sa.func.count()).select_from(GLAccount)).scalar_one()
+    txns = session.execute(sa.select(sa.func.count()).select_from(GLTransaction)).scalar_one()
+    return bool(accounts or txns)
+
+
 def run_self_check(session: Session) -> list[CriterionResult]:
     """Run all six criteria against the current database state and return
-    pass/fail-with-reasons — never a bare boolean."""
+    pass/fail-with-reasons — never a bare boolean. On an empty database,
+    returns a single explicit 'no data' result rather than six vacuous
+    passes."""
+    if not has_data(session):
+        return [
+            CriterionResult(
+                "—", "No data to verify", False,
+                ["0 GL accounts and 0 transactions — an empty database passes every "
+                 "criterion vacuously; seed data (or run scripts/demo.py) before "
+                 "reading this as 'adequate'"],
+            )
+        ]
     return [check(session) for check in CHECKS]
 
 

@@ -1,7 +1,6 @@
 """v1.1: Excel exporter read-back and the contract full-picture statement."""
 
 import datetime
-from decimal import Decimal
 
 from openpyxl import load_workbook
 

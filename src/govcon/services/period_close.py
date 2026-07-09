@@ -173,7 +173,7 @@ def close_period(session: Session, period: Period, *, closed_by: str) -> Reconci
         )
     period.reconciliation_status = ReconciliationStatus.PASSED
     period.status = PeriodStatus.CLOSED
-    period.closed_at = datetime.datetime.now(datetime.timezone.utc)
+    period.closed_at = datetime.datetime.now(datetime.UTC)
     period.closed_by = closed_by
     session.flush()
     if fiscal_year_fully_closed(session, period.fiscal_year):

@@ -36,13 +36,13 @@ D = datetime.date
 #   Applied = 13,500. Volume = 13,500−13,000 = +500 F.
 
 
-def _standard(session, element, qty, rate):
+def _standard(session, element, qty, rate, eff=D(2026, 1, 1)):
     row = StandardCost(
         cost_element=element,
         operation_or_product_code="1.2.3",  # the fixture wbs_id
         standard_quantity=Decimal(qty),
         standard_rate=Decimal(rate),
-        effective_date=D(2026, 1, 1),
+        effective_date=eff,
     )
     session.add(row)
     session.flush()
@@ -155,9 +155,8 @@ def test_missing_quantity_or_units_refused(session):
 def test_standard_matching_is_dated_and_by_code(session):
     data = seed_all(session)
     old = _standard(session, StandardCostElement.LABOR, "2", "28")
-    old.superseded_date = D(2026, 6, 1)
-    new = _standard(session, StandardCostElement.LABOR, "2", "30")
-    new.effective_date = D(2026, 6, 1)
+    old.superseded_date = D(2026, 6, 1)  # supersession sets superseded_date (allowed)
+    new = _standard(session, StandardCostElement.LABOR, "2", "30", eff=D(2026, 6, 1))
     session.flush()
     assert find_standard(
         session, code="1.2.3", cost_element=StandardCostElement.LABOR, on_date=D(2026, 5, 1)

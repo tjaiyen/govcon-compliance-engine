@@ -47,6 +47,12 @@ class GLAccount(Base):
     # Company Labor Base" sums labor everywhere — direct, overhead, and G&A —
     # and only this flag can find labor among indirect accounts.
     is_labor: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Compensation identification (§4a, stress-test fix): the exec-comp cap
+    # YTD tracker must sum ONLY compensation — not every transaction that
+    # happens to carry a person_id (a travel reimbursement on the same
+    # person would otherwise inflate the cap determination). Only accounts
+    # flagged here count toward a person's YTD compensation.
+    is_compensation: Mapped[bool] = mapped_column(default=False, nullable=False)
     pool_assignment: Mapped[int | None] = mapped_column(
         sa.ForeignKey("indirect_pools.pool_id")
     )

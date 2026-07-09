@@ -12,9 +12,9 @@ from govcon.core.errors import ScheduleGenerationError, SignerLevelError
 from govcon.models import IndirectPool, PayrollRegister, Voucher
 from govcon.models.billing import ScheduleType, SignerRole
 from govcon.models.enums import PoolName, PoolStatus, RateType, ReconciliationStatus
+from govcon.services.ice_schedules import BANNER, OUT_OF_SCOPE_SCHEDULES, generate_schedule
 from govcon.services.period_close import close_period
 from tests.fixtures.synthetic_data import seed_all
-from govcon.services.ice_schedules import BANNER, OUT_OF_SCOPE_SCHEDULES, generate_schedule
 
 D = datetime.date
 

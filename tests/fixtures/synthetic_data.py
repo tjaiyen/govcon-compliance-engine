@@ -187,7 +187,7 @@ def ga_pool() -> IndirectPool:
     )
 
 
-def per_diem_rate_seattle() -> "GSAPerDiemRate":
+def per_diem_rate_seattle() -> GSAPerDiemRate:
     from govcon.models import GSAPerDiemRate
 
     return GSAPerDiemRate(
@@ -199,7 +199,7 @@ def per_diem_rate_seattle() -> "GSAPerDiemRate":
     )
 
 
-def synthetic_exec_comp_cap() -> "RegulatoryThreshold":
+def synthetic_exec_comp_cap() -> RegulatoryThreshold:
     """CLEARLY-SYNTHETIC cap row for tests only, occupying CY2026 — the year
     whose official BBA §702 amount was NOT yet published in a primary source
     (migration 0012 seeds verified CY2024/CY2025 and deliberately leaves

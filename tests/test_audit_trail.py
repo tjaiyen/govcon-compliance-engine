@@ -1,14 +1,12 @@
 """Every write lands in the hash-chained audit trail; the chain verifies;
 an out-of-band tamper is detected at the right row."""
 
-import datetime
 import json
-from decimal import Decimal
 
 import sqlalchemy as sa
 
 from govcon.db.audit import GENESIS_HASH, verify_audit_chain
-from govcon.models import AuditTrail, GLTransaction, Person
+from govcon.models import AuditTrail
 from govcon.models.enums import PeriodStatus
 from tests.fixtures.synthetic_data import seed_all
 

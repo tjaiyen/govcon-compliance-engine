@@ -41,6 +41,20 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
+    # SQLite does not enforce FKs by default, and the app engine's
+    # connect-event pragma does NOT fire for Alembic's own connection — a
+    # stress test found FKs silently OFF during migrations. Attach the pragma
+    # as a connect-event on the engine (NOT inline on the connection, which
+    # would open a transaction and break Alembic's own commit).
+    if connectable.dialect.name == "sqlite":
+        from sqlalchemy import event
+
+        @event.listens_for(connectable, "connect")
+        def _fk_on(dbapi_conn, _record):  # pragma: no cover - trivial
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA foreign_keys=ON")
+            cur.close()
+
     with connectable.connect() as connection:
         context.configure(
             connection=connection,

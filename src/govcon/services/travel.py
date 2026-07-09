@@ -8,7 +8,6 @@ pattern, not one row with a note. Real-time, never a nightly batch.
 from __future__ import annotations
 
 import datetime
-from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session

@@ -121,7 +121,7 @@ def write_audit_rows(session: Session, _ctx) -> None:
     ).scalar()
     prev = prev or GENESIS_HASH
     for table, record_id, action, old, new in changes:
-        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
             "table_name": table,
             "record_id": record_id,
@@ -156,6 +156,19 @@ def verify_audit_chain(session: Session) -> tuple[bool, int | None]:
     the first row whose stored hash or linkage does not recompute.
     """
     prev = GENESIS_HASH
+    # Contiguity check (a stress test noted mid-chain row deletion was
+    # undetectable): trail_ids are a gapless 1..N sequence, so a gap means a
+    # row was deleted out of band even if the surviving rows still hash-link.
+    count, max_id = session.execute(
+        sa.select(sa.func.count(AuditTrail.trail_id), sa.func.max(AuditTrail.trail_id))
+    ).one()
+    if count and max_id != count:
+        # find the first missing id for the report
+        present = set(
+            session.execute(sa.select(AuditTrail.trail_id)).scalars()
+        )
+        first_gap = next(i for i in range(1, max_id + 1) if i not in present)
+        return False, first_gap
     rows = session.execute(
         sa.select(AuditTrail).order_by(AuditTrail.trail_id)
     ).scalars()

@@ -4,8 +4,6 @@ stamped at capture via post_transaction (append-only means never after)."""
 import datetime
 from decimal import Decimal
 
-import pytest
-
 from govcon.models import ContractClauseException
 from govcon.services.allowability import evaluate_allowability, post_transaction
 from tests.fixtures.synthetic_data import seed_all
@@ -51,9 +49,9 @@ def test_unallowable_transaction_is_flagged_with_citation(session):
 
 
 def test_indirect_vs_ga_allocability(session):
-    from tests.fixtures.synthetic_data import ga_pool
     from govcon.models import GLAccount
     from govcon.models.enums import CostType
+    from tests.fixtures.synthetic_data import ga_pool
 
     data = seed_all(session)
     gapool = ga_pool()

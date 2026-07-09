@@ -45,10 +45,16 @@ class ExecCompStatus:
 
 
 def ytd_compensation(session: Session, person: Person, fiscal_year: int) -> Decimal:
+    """Sum a person's YTD COMPENSATION — only transactions on accounts
+    flagged is_compensation. A stress test found the prior version summed
+    every transaction carrying the person_id (e.g. a travel reimbursement),
+    inflating the cap determination and the auto-reclass excess."""
     amounts = session.execute(
         sa.select(GLTransaction.amount)
         .join(Period, GLTransaction.period_id == Period.period_id)
+        .join(GLAccount, GLTransaction.account_id == GLAccount.account_id)
         .where(GLTransaction.person_id == person.person_id)
+        .where(GLAccount.is_compensation.is_(True))
         .where(Period.fiscal_year == fiscal_year)
     ).scalars()
     return sum((Decimal(a) for a in amounts), Decimal("0.00"))
@@ -59,8 +65,14 @@ def exec_comp_status(
 ) -> ExecCompStatus:
     cap_row = threshold_in_force(session, "EXEC_COMP_CAP", as_of)  # raises if unseeded
     cap = cap_row.value
+    if cap is None or cap <= 0:
+        raise ValueError(
+            f"EXEC_COMP_CAP row {cap_row.threshold_id} has a non-positive value "
+            f"({cap}) — a status-only or malformed cap cannot bound compensation; "
+            "fix the seed, do not silently pass"
+        )
     ytd = ytd_compensation(session, person, fiscal_year)
-    pct = (ytd / cap) if cap else Decimal(0)
+    pct = ytd / cap
     level = "ok"
     for cutoff, name in LEVELS:
         if pct >= cutoff:
@@ -97,6 +109,10 @@ def reclassify_excess(
     this nets out what prior runs already moved to the unallowable account
     and posts only the remaining delta."""
     status = exec_comp_status(session, person, fiscal_year, as_of)
+    # Count ONLY prior auto-reclass postings (matched by the note prefix),
+    # not every person-linked row on the unallowable account — a stress test
+    # noted a separately-disallowed cost on the same account would otherwise
+    # be mistaken for "already reclassified" and under-adjust the excess.
     already = sum(
         (
             Decimal(a)
@@ -105,6 +121,7 @@ def reclassify_excess(
                 .join(Period, GLTransaction.period_id == Period.period_id)
                 .where(GLTransaction.person_id == person.person_id)
                 .where(GLTransaction.account_id == unallowable_account.account_id)
+                .where(GLTransaction.source_document.like("FAR 31.205-6(p) auto-reclass%"))
                 .where(Period.fiscal_year == fiscal_year)
             ).scalars()
         ),

@@ -15,8 +15,13 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from govcon.models import CostAccountingPractice, GLAccount, PracticeChangeEvent, RegulatoryThreshold
-from govcon.models.practices import ChangeEventStatus, DisclosedTreatment
+from govcon.models import (
+    CostAccountingPractice,
+    GLAccount,
+    PracticeChangeEvent,
+    RegulatoryThreshold,
+)
+from govcon.models.practices import ChangeEventStatus
 
 #: Modified CAS coverage is exactly these four standards (reg-ref §2).
 MODIFIED_COVERAGE_STANDARDS = ("CAS 401", "CAS 402", "CAS 405", "CAS 406")

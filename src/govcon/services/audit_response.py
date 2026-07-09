@@ -19,8 +19,8 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from govcon.core.errors import GovconError
-from govcon.models import AuditAlertLog, AuditNotification
-from govcon.models.monitoring import AlertPoint, AuditType, NotificationStatus
+from govcon.models import AuditAlertLog, AuditNotification, AuditResponseTask
+from govcon.models.monitoring import AlertPoint, AuditType, NotificationStatus, TaskStatus
 
 #: T-minus escalation points (days before the computed deadline). Points
 #: that don't fit a shorter response window are skipped — an alert can't
@@ -103,7 +103,7 @@ def fire_due_alerts(
             alert = AuditAlertLog(
                 notification_id=notification.notification_id,
                 alert_point=point,
-                fired_at=datetime.datetime.now(datetime.timezone.utc),
+                fired_at=datetime.datetime.now(datetime.UTC),
             )
             session.add(alert)
             fired.append(alert)
@@ -115,9 +115,56 @@ def acknowledge_alert(
     session: Session, alert: AuditAlertLog, *, acknowledged_by: str
 ) -> AuditAlertLog:
     alert.acknowledged_by = acknowledged_by
-    alert.acknowledged_at = datetime.datetime.now(datetime.timezone.utc)
+    alert.acknowledged_at = datetime.datetime.now(datetime.UTC)
     session.flush()
     return alert
+
+
+def add_task(
+    session: Session,
+    notification: AuditNotification,
+    *,
+    description: str,
+    owner: str,
+    due_date: datetime.date,
+) -> AuditResponseTask:
+    """Add a document-collection / response task under a notification (§13
+    — the checklist the audit response is assembled from). audit_response_tasks
+    had no service until a stress test flagged it as a dead table."""
+    task = AuditResponseTask(
+        notification_id=notification.notification_id,
+        description=description,
+        owner=owner,
+        due_date=due_date,
+    )
+    session.add(task)
+    session.flush()
+    return task
+
+
+def complete_task(session: Session, task: AuditResponseTask) -> AuditResponseTask:
+    task.status = TaskStatus.COMPLETE
+    task.completed_date = datetime.date.today()
+    session.flush()
+    return task
+
+
+def sweep_overdue_tasks(
+    session: Session, notification: AuditNotification, as_of: datetime.date
+) -> list[AuditResponseTask]:
+    """Mark still-open tasks past their due date as overdue; returns them.
+    The open-tasks-past-due are exactly what the §13 follow-up stage must
+    not let disappear."""
+    tasks = session.execute(
+        sa.select(AuditResponseTask)
+        .where(AuditResponseTask.notification_id == notification.notification_id)
+        .where(AuditResponseTask.status == TaskStatus.OPEN)
+        .where(AuditResponseTask.due_date < as_of)
+    ).scalars().all()
+    for task in tasks:
+        task.status = TaskStatus.OVERDUE
+    session.flush()
+    return tasks
 
 
 def record_management_review(
@@ -130,7 +177,7 @@ def record_management_review(
             f"(current status: {notification.status.value})"
         )
     notification.reviewed_by = reviewed_by
-    notification.reviewed_at = datetime.datetime.now(datetime.timezone.utc)
+    notification.reviewed_at = datetime.datetime.now(datetime.UTC)
     session.flush()
     return notification
 

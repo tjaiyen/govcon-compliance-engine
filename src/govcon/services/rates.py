@@ -79,12 +79,21 @@ def _approved_rate(
 ) -> Decimal:
     from govcon.models.enums import PoolStatus as _PS
 
+    # Deterministic selection (a stress test found limit(1) with no ORDER BY
+    # was nondeterministic when both a LOCKED row and a later APPROVED
+    # revision matched): prefer the LOCKED row (the settled, period-closed
+    # rate), else the most recently calculated approved row.
     rate = session.execute(
         sa.select(IndirectPool.calculated_rate)
         .where(IndirectPool.pool_name == pool_name)
         .where(IndirectPool.fiscal_year == fiscal_year)
         .where(IndirectPool.rate_type == rate_type)
         .where(IndirectPool.status.in_([_PS.APPROVED, _PS.LOCKED]))
+        .order_by(
+            (IndirectPool.status == _PS.LOCKED).desc(),
+            IndirectPool.calculated_at.desc().nulls_last(),
+            IndirectPool.pool_id.desc(),
+        )
         .limit(1)
     ).scalar_one_or_none()
     if rate is None:
@@ -156,7 +165,7 @@ def calculate_pool_rate(session: Session, pool: IndirectPool) -> RateCalculation
 
     pool.pool_balance = balance
     pool.calculated_rate = rate
-    pool.calculated_at = datetime.datetime.now(datetime.timezone.utc)
+    pool.calculated_at = datetime.datetime.now(datetime.UTC)
     run = RateCalculationRun(
         run_type=RunType.POOL_RATE,
         pool_id=pool.pool_id,
@@ -228,7 +237,7 @@ def burdened_cost(
     )
     run = RateCalculationRun(
         run_type=RunType.BURDENED_COST,
-        calculated_at=datetime.datetime.now(datetime.timezone.utc),
+        calculated_at=datetime.datetime.now(datetime.UTC),
         inputs_snapshot=json.dumps(
             {
                 "direct_labor": format(Decimal(direct_labor), "f"),

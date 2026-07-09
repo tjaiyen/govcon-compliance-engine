@@ -29,14 +29,34 @@ def _not_unallowable():
 
 
 def pool_numerator_transactions(session: Session, pool: IndirectPool) -> list[GLTransaction]:
-    """Transactions contributing to a pool's cost numerator — unallowable
-    codes structurally cannot carry a pool assignment (CHECK constraint),
-    and this filter excludes them explicitly anyway (belt + suspenders)."""
+    """Transactions contributing to a pool's cost numerator.
+
+    A pool's cost numerator is a function of its IDENTITY — pool_name +
+    fiscal_year — NOT of the specific rate-version row. A stress test found
+    that matching on pool_id alone gave the provisional row the whole
+    numerator and the actual_final row (same pool/year) a spurious ZERO,
+    because GL accounts carry a single pool_assignment FK. Constituent
+    accounts are resolved to their pool's (name, year) so provisional and
+    actual_final compute the same numerator from the same ledger.
+
+    Unallowable codes structurally cannot carry a pool assignment (CHECK
+    constraint); the filter excludes them anyway (belt + suspenders)."""
+    # Also filter transactions to the pool's OWN fiscal year (via the
+    # period) — a second stress-test finding: without it, a later-year
+    # transaction on the same account contaminated the earlier year's
+    # claimed rate (FY2027 costs inflating an FY2026 numerator).
+    from govcon.models import Period
+
+    sibling = sa.orm.aliased(IndirectPool)
     return list(
         session.execute(
             sa.select(GLTransaction)
             .join(GLAccount, GLTransaction.account_id == GLAccount.account_id)
-            .where(GLAccount.pool_assignment == pool.pool_id)
+            .join(sibling, GLAccount.pool_assignment == sibling.pool_id)
+            .join(Period, GLTransaction.period_id == Period.period_id)
+            .where(sibling.pool_name == pool.pool_name)
+            .where(sibling.fiscal_year == pool.fiscal_year)
+            .where(Period.fiscal_year == pool.fiscal_year)
             .where(_not_unallowable())
         ).scalars()
     )

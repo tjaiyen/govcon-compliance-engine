@@ -24,7 +24,15 @@ def post_correction(
     and (2) a replacement row with the corrected fields. Returns
     (reversal, replacement). Caller commits.
     """
-    reversal = GLTransaction(
+    # Route both rows through post_transaction so each is stamped with a
+    # freshly-evaluated allowability vector AT CAPTURE (a stress test found
+    # the prior direct-construction left both rows' vector NULL — the table
+    # is append-only, so it could never be stamped afterward, contradicting
+    # allowability.py's "a correction re-evaluates on the replacement row").
+    from govcon.services.allowability import post_transaction
+
+    reversal = post_transaction(
+        session,
         account_id=original.account_id,
         contract_id=original.contract_id,
         person_id=original.person_id,
@@ -45,7 +53,5 @@ def post_correction(
         superseded_by=original.transaction_id,
     )
     replacement_defaults.update(replacement_fields)
-    replacement = GLTransaction(**replacement_defaults)
-    session.add_all([reversal, replacement])
-    session.flush()
+    replacement = post_transaction(session, **replacement_defaults)
     return reversal, replacement

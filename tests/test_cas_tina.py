@@ -4,8 +4,6 @@ exemption paths, per-action TINA evaluation with no vehicle inheritance."""
 import datetime
 from decimal import Decimal
 
-import pytest
-
 from govcon.models import Contract, ContractAction
 from govcon.models.enums import (
     AgencyType,
