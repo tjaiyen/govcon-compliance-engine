@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GovCon Compliance Engine — Blueprint</title>
+<meta name="description" content="A visual blueprint of a local-first GovCon cost-accounting compliance engine: FAR Part 31, SF 1408, CAS/TINA dated thresholds, ICS/ICE schedules, Eichleay, and standard costing — with a hash-chained audit trail. Synthetic data only.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="GovCon Compliance Engine — Blueprint">
+<meta property="og:description" content="The regulations, encoded as working, audited software. What each module does and how to run it.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>%F0%9F%93%90</text></svg>">
+</head>
+<body style="margin:0; background:#0a1f33;">
+<style>
+  :root {
+    --ground: #0a1f33;
+    --plate: #10293f;
+    --plate-2: #163853;
+    --ink: #eaf2f9;
+    --ink-dim: #9fb8cd;
+    --ink-faint: #5f7c96;
+    --rule: rgba(159, 184, 205, 0.16);
+    --rule-strong: rgba(159, 184, 205, 0.34);
+    --accent: #f4b740;
+    --accent-dim: rgba(244, 183, 64, 0.14);
+    --good: #46d39a;
+    --crit: #ff7a7a;
+    --info: #6bb6ec;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sheet-max: 1120px;
+  }
+
+  * { box-sizing: border-box; }
+
+  .bp {
+    background-color: var(--ground);
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px),
+      linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 34px 34px;
+    background-position: -1px -1px;
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.65;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    padding: 0 20px 72px;
+    overflow-x: hidden;
+  }
+
+  .bp .wrap { max-width: var(--sheet-max); margin: 0 auto; }
+
+  /* ---- typography primitives ---- */
+  .bp .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .bp .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--rule-strong), transparent);
+  }
+  .bp h2 {
+    font-size: clamp(1.5rem, 3.2vw, 2rem);
+    font-weight: 680;
+    letter-spacing: -0.015em;
+    margin: 0 0 10px;
+    text-wrap: balance;
+  }
+  .bp .lede { color: var(--ink-dim); max-width: 62ch; margin: 0; }
+  .bp .mono { font-family: var(--mono); }
+  .bp .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  section.plate { padding: 58px 0 8px; }
+
+  /* ---- hero ---- */
+  .bp .hero {
+    padding: 76px 0 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .bp .hero .kicker {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 22px;
+  }
+  .bp .hero h1 {
+    font-size: clamp(2.4rem, 6.4vw, 4.3rem);
+    line-height: 1.02;
+    font-weight: 720;
+    letter-spacing: -0.028em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .bp .hero h1 .glow { color: var(--accent); }
+  .bp .hero .sub { font-size: clamp(1.05rem, 2vw, 1.28rem); color: var(--ink-dim); max-width: 64ch; margin: 0 0 34px; }
+
+  .bp .stamps { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 28px; }
+  .bp .stamp {
+    border: 1px solid var(--rule-strong);
+    background: rgba(255, 255, 255, 0.015);
+    border-radius: 3px;
+    padding: 12px 16px;
+    min-width: 96px;
+  }
+  .bp .stamp .v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.5rem; font-weight: 600; line-height: 1; color: var(--ink); }
+  .bp .stamp .v.ok { color: var(--good); }
+  .bp .stamp .k { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-faint); margin-top: 7px; }
+
+  .bp .banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px dashed var(--accent);
+    background: var(--accent-dim);
+    padding: 9px 15px;
+    border-radius: 3px;
+  }
+  .bp .banner .dot { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; flex: none; }
+
+  /* ---- module plates ---- */
+  .bp .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; margin-top: 30px; }
+  .bp .card { background: var(--plate); padding: 22px 22px 20px; display: flex; flex-direction: column; gap: 10px; transition: background 140ms ease, transform 140ms ease; position: relative; }
+  .bp .card::before { content: ""; position: absolute; left: 0; top: 0; height: 2px; width: 0; background: var(--accent); transition: width 200ms ease; }
+  .bp .card:hover { background: var(--plate-2); }
+  .bp .card:hover::before { width: 100%; }
+  .bp .card .ref { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.09em; color: var(--accent); }
+  .bp .card h3 { font-size: 1.06rem; font-weight: 640; margin: 0; letter-spacing: -0.01em; }
+  .bp .card p { margin: 0; font-size: 0.9rem; color: var(--ink-dim); line-height: 1.55; flex: 1; }
+  .bp .card .foot { font-family: var(--mono); font-size: 0.73rem; color: var(--ink-faint); border-top: 1px solid var(--rule); padding-top: 11px; margin-top: 4px; }
+  .bp .card .foot b { color: var(--ink); font-weight: 500; }
+
+  /* ---- pipeline / architecture ---- */
+  .bp .diagram-scroll { overflow-x: auto; padding: 6px 0 14px; margin-top: 30px; }
+  .bp .pipeline { display: flex; align-items: stretch; gap: 0; min-width: 760px; }
+  .bp .stage { flex: 1; min-width: 118px; border: 1px solid var(--rule-strong); background: var(--plate); border-radius: 4px; padding: 16px 14px; position: relative; }
+  .bp .stage + .stage { margin-left: 30px; }
+  .bp .stage + .stage::before {
+    content: "";
+    position: absolute; left: -31px; top: 50%; width: 31px; height: 1px;
+    background: var(--rule-strong);
+  }
+  .bp .stage + .stage::after {
+    content: "";
+    position: absolute; left: -8px; top: 50%; width: 7px; height: 7px;
+    border-top: 1px solid var(--accent); border-right: 1px solid var(--accent);
+    transform: translateY(-50%) rotate(45deg);
+  }
+  .bp .stage .n { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 9px; }
+  .bp .stage .t { font-size: 0.92rem; font-weight: 600; line-height: 1.3; }
+  .bp .stage .d { font-size: 0.78rem; color: var(--ink-dim); margin-top: 6px; line-height: 1.4; }
+  .bp .stage.terminal { border-color: var(--accent); }
+  .bp .stage.terminal .t { color: var(--accent); }
+
+  .bp .rail {
+    min-width: 760px;
+    margin-top: 14px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 4px;
+    background: repeating-linear-gradient(90deg, rgba(70,211,154,0.06) 0 14px, transparent 14px 28px);
+    padding: 13px 16px;
+    display: flex; align-items: center; gap: 12px;
+    font-family: var(--mono); font-size: 0.76rem; color: var(--good);
+  }
+  .bp .rail .lbl { letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.66rem; color: var(--good); }
+  .bp .rail .chain { display: flex; gap: 5px; align-items: center; color: var(--ink-faint); }
+  .bp .rail .blk { width: 15px; height: 15px; border: 1px solid var(--good); border-radius: 2px; }
+
+  /* ---- three-layer enforcement ---- */
+  .bp .layers { margin-top: 34px; display: flex; flex-direction: column; gap: 1px; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .bp .layer { background: var(--plate); padding: 16px 20px; display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+  .bp .layer .lv { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); min-width: 128px; }
+  .bp .layer .lt { font-weight: 600; min-width: 190px; }
+  .bp .layer .ld { color: var(--ink-dim); font-size: 0.9rem; flex: 1; min-width: 220px; }
+
+  /* ---- phases timeline ---- */
+  .bp .phases { margin-top: 30px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .bp .phase { border-left: 2px solid var(--rule-strong); padding: 3px 0 3px 13px; }
+  .bp .phase .pn { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; color: var(--accent); }
+  .bp .phase .pt { font-size: 0.86rem; color: var(--ink); margin-top: 3px; line-height: 1.35; }
+  .bp .phase.done { border-left-color: var(--good); }
+
+  /* ---- console ---- */
+  .bp .console { margin-top: 28px; border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; background: #071624; }
+  .bp .console .bar { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--rule); background: rgba(255,255,255,0.02); }
+  .bp .console .bar .tl { width: 11px; height: 11px; border-radius: 50%; background: var(--rule-strong); }
+  .bp .console .bar .cap { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); margin-left: 6px; }
+  .bp .console pre { margin: 0; padding: 18px 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 0.83rem; line-height: 1.85; }
+  .bp .console .l { display: block; white-space: pre; }
+  .bp .console .p { color: var(--good); }               /* prompt */
+  .bp .console .c { color: var(--ink); }                 /* command */
+  .bp .console .c b { color: var(--accent); font-weight: 500; }
+  .bp .console .cm { color: var(--ink-faint); }          /* comment */
+
+  .bp .note { margin-top: 16px; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-dim); }
+  .bp .note b { color: var(--accent); font-weight: 500; }
+
+  /* ---- signals ---- */
+  .bp .signals { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 30px; }
+  .bp .sig { border: 1px solid var(--rule); border-radius: 4px; padding: 20px; background: var(--plate); }
+  .bp .sig h4 { margin: 0 0 8px; font-size: 0.98rem; font-weight: 640; }
+  .bp .sig p { margin: 0; font-size: 0.87rem; color: var(--ink-dim); line-height: 1.55; }
+  .bp .pills { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .bp .pill { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.06em; padding: 4px 9px; border-radius: 3px; border: 1px solid var(--rule-strong); color: var(--ink-dim); }
+  .bp .pill.stat { color: var(--info); border-color: rgba(107,182,236,0.4); }
+  .bp .pill.prop { color: var(--accent); border-color: rgba(244,183,64,0.4); }
+  .bp .pill.dev { color: var(--good); border-color: rgba(70,211,154,0.4); }
+  .bp .sig .big { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 620; color: var(--accent); line-height: 1; margin-bottom: 8px; }
+
+  /* ---- footer ---- */
+  .bp footer { margin-top: 64px; border-top: 1px solid var(--rule); padding-top: 26px; display: flex; flex-wrap: wrap; gap: 20px; align-items: baseline; justify-content: space-between; }
+  .bp footer .disc { font-size: 0.82rem; color: var(--ink-faint); max-width: 56ch; }
+  .bp footer a { color: var(--accent); text-decoration: none; font-family: var(--mono); font-size: 0.82rem; border-bottom: 1px solid var(--accent-dim); }
+  .bp footer a:hover { border-bottom-color: var(--accent); }
+  .bp a:focus-visible, .bp .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .bp .reveal { animation: bpfade 620ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+    .bp section.plate.reveal { animation-delay: 60ms; }
+    @keyframes bpfade { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  }
+  @media (max-width: 560px) {
+    .bp .stamp .v { font-size: 1.3rem; }
+    section.plate { padding: 44px 0 8px; }
+  }
+</style>
+
+<div class="bp">
+  <div class="wrap">
+
+    <!-- HERO -->
+    <header class="hero reveal">
+      <p class="kicker">Government-Contracting Cost-Accounting Compliance Engine</p>
+      <h1>The regulations, encoded as <span class="glow">working, audited software.</span></h1>
+      <p class="sub">A local-first engine that turns FAR Part 31, SF 1408, the 2026 NDAA cost thresholds, ICS/ICE schedules, Eichleay, and standard-cost variance analysis into a tested calculation system — with an append-only, hash-chained audit trail underneath every number.</p>
+
+      <div class="stamps">
+        <div class="stamp"><div class="v num">34</div><div class="k">Tables</div></div>
+        <div class="stamp"><div class="v num ok">176</div><div class="k">Tests · green</div></div>
+        <div class="stamp"><div class="v num">14</div><div class="k">Migrations</div></div>
+        <div class="stamp"><div class="v num">23</div><div class="k">Modules</div></div>
+        <div class="stamp"><div class="v ok">CI ✓</div><div class="k">MIT · Python 3.11+</div></div>
+      </div>
+
+      <span class="banner"><span class="dot"></span>Synthetic data — not for regulatory reliance</span>
+    </header>
+
+    <!-- WHAT IT DOES -->
+    <section class="plate reveal">
+      <p class="eyebrow">What it does</p>
+      <h2>Ten compliance domains, each encoded to the citation</h2>
+      <p class="lede">Every module maps to a real regulatory reference and is exercised by a build phase and, where relevant, a CLI command.</p>
+
+      <div class="grid">
+        <div class="card" tabindex="0">
+          <span class="ref">FAR 31.205</span>
+          <h3>Allowability filter</h3>
+          <p>The five-part allowability test, stamped onto every transaction at capture as a structured vector — reasonableness, allocability, CAS/GAAP, the unallowable Chart-of-Accounts map, and contract-clause overrides.</p>
+          <div class="foot">Phase 2 · <b>18 FAR 31.205 categories seeded</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">SF 1408</span>
+          <h3>Adequacy self-check</h3>
+          <p>The six pre-award accounting-system criteria run as assertions against the live database — segregation, job-cost accumulation, pool allocation, unallowable exclusion, the close gate, and billing tie-out.</p>
+          <div class="foot">Phase 6 · <b>govcon sf1408</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">CAS · TINA</span>
+          <h3>Dated-threshold engine</h3>
+          <p>CAS coverage tier and TINA applicability decided against the threshold in force on the award date — the 2026 NDAA resets ($2.5M→$10M TINA, $7.5M→$35M CAS) as versioned rules, evaluated per contract action.</p>
+          <div class="foot">Phase 7 · <b>never a hard-coded scalar</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">FRINGE · OH · G&amp;A</span>
+          <h3>Indirect rate engine</h3>
+          <p>Three-tier rate calculation with provisional-to-final true-up and fully-burdened cost. Every run stamps its inputs so any figure reproduces from its own record eighteen months later.</p>
+          <div class="foot">Phase 4 · <b>reconstruct_run()</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">ICE A–O · §11</span>
+          <h3>Schedules &amp; period close</h3>
+          <p>Ten ICS/ICE schedules generated as structured data, gated on a period-close mechanism whose three-way GL/JCL/billing reconciliation must pass before a period locks.</p>
+          <div class="foot">Phase 5 · <b>govcon export 2026 G</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">TINA · 15.403-4</span>
+          <h3>Defective-pricing sweep</h3>
+          <p>The deterministic post-award sweep: each locked baseline assumption compared against subsequent ledger activity, one reproducible finding row per comparison — the log <em>is</em> the audit trail.</p>
+          <div class="foot">Phase 8 · <b>certification gated on the sweep</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">CDA · EICHLEAY</span>
+          <h3>Claims &amp; delay damages</h3>
+          <p>REA-vs-CDA comparator with the DFARS absolute-value certification test, plus the three-step Eichleay unabsorbed-overhead calculator — refusing to run on unreconciled inputs or undocumented entitlement.</p>
+          <div class="foot">Phase 9 · <b>ABS(inc)+ABS(dec), never net</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">PBR · §13</span>
+          <h3>Monitoring &amp; deadlines</h3>
+          <p>Provisional-billing-rate fluctuation monitoring during the year, and an audit-response simulator that escalates T-30/14/7/3/1 and blocks submission without a recorded management-review sign-off.</p>
+          <div class="foot">Phase 11 · <b>the missed deadline is the real risk</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">CAS 407</span>
+          <h3>Standard costing</h3>
+          <p>Six textbook variance calculators — material price/usage, labor rate/efficiency, two-way overhead spending/volume — with one sign convention, computed independently of the allowability layer.</p>
+          <div class="foot">Phase 12 · <b>standard − actual, positive = favorable</b></div>
+        </div>
+        <div class="card" tabindex="0">
+          <span class="ref">CROSS-CUTTING</span>
+          <h3>Hash-chained audit trail</h3>
+          <p>Every write captured in a SHA-256 chained log — tamper-evident by construction, contiguity-checked, and verifiable on demand. The foundation the other nine modules are built on.</p>
+          <div class="foot">Phase 1 · <b>govcon audit verify</b></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE -->
+    <section class="plate reveal">
+      <p class="eyebrow">How it's built — the data flow</p>
+      <h2>Compliance enforced at the edge, not at reporting time</h2>
+      <p class="lede">A transaction is validated and classified the moment it's written. By the time anything reaches a report, the rules have already held.</p>
+
+      <div class="diagram-scroll">
+        <div class="pipeline">
+          <div class="stage"><div class="n">Input</div><div class="t">Transaction</div><div class="d">Posted through the service layer</div></div>
+          <div class="stage"><div class="n">At capture</div><div class="t">Allowability vector</div><div class="d">Five-part test stamped, never later</div></div>
+          <div class="stage"><div class="n">Ledgers</div><div class="t">GL · JCL · Pools</div><div class="d">Three simultaneous ledgers</div></div>
+          <div class="stage"><div class="n">Gate</div><div class="t">Period close</div><div class="d">Three-way reconciliation must pass</div></div>
+          <div class="stage"><div class="n">Compute</div><div class="t">Rate engine</div><div class="d">Fringe · OH · G&amp;A · true-up</div></div>
+          <div class="stage terminal"><div class="n">Output</div><div class="t">ICE schedules</div><div class="d">A–O, generated + reconciled</div></div>
+        </div>
+      </div>
+      <div class="diagram-scroll" style="padding-top:0;">
+        <div class="rail">
+          <span class="lbl">Append-only audit trail</span>
+          <span class="chain"><span class="blk"></span>→<span class="blk"></span>→<span class="blk"></span>→<span class="blk"></span> SHA-256 hash chain spans every write above</span>
+        </div>
+      </div>
+
+      <div class="layers">
+        <div class="layer"><span class="lv">Layer 1 · say</span><span class="lt">Typed service error</span><span class="ld">A friendly, explanatory exception fires first in normal use — it tells you what broke and how to fix it.</span></div>
+        <div class="layer"><span class="lv">Layer 2 · refuse</span><span class="lt">Database trigger</span><span class="ld">A RAISE(ABORT) trigger backstops the rule against raw SQL — the guarantee holds even if the app is bypassed.</span></div>
+        <div class="layer"><span class="lv">Layer 3 · prove</span><span class="lt">Queryable audit record</span><span class="ld">The hash-chained trail shows who/what/when with before-and-after — the evidence a DCAA reviewer would ask for.</span></div>
+      </div>
+
+      <div class="phases">
+        <div class="phase done"><div class="pn">Phase 0–1</div><div class="pt">Ledger schema + audit trail</div></div>
+        <div class="phase done"><div class="pn">Phase 2</div><div class="pt">FAR 31 allowability</div></div>
+        <div class="phase done"><div class="pn">Phase 3</div><div class="pt">Modified-CAS consistency</div></div>
+        <div class="phase done"><div class="pn">Phase 4</div><div class="pt">Indirect rate engine</div></div>
+        <div class="phase done"><div class="pn">Phase 5</div><div class="pt">ICE + period close</div></div>
+        <div class="phase done"><div class="pn">Phase 6</div><div class="pt">SF 1408 self-check</div></div>
+        <div class="phase done"><div class="pn">Phase 7–8</div><div class="pt">CAS/TINA + sweep</div></div>
+        <div class="phase done"><div class="pn">Phase 9</div><div class="pt">REA/CDA + Eichleay</div></div>
+        <div class="phase done"><div class="pn">Phase 10–12</div><div class="pt">Polish · PBR · std cost</div></div>
+      </div>
+    </section>
+
+    <!-- HOW TO RUN -->
+    <section class="plate reveal">
+      <p class="eyebrow">How to run it</p>
+      <h2>Clone, sync, and watch it prove itself</h2>
+      <p class="lede">Everything runs locally on SQLite with zero configuration. The demo builds a synthetic contractor from scratch and takes it through the whole pipeline.</p>
+
+      <div class="console">
+        <div class="bar"><span class="tl"></span><span class="tl"></span><span class="tl"></span><span class="cap">quick start</span></div>
+        <pre><span class="l"><span class="p">$</span> <span class="c">uv sync</span>                              <span class="cm"># Python 3.11+, managed by uv</span></span><span class="l"><span class="p">$</span> <span class="c">uv run pytest</span>                        <span class="cm"># 176 tests — one per business rule</span></span><span class="l"><span class="p">$</span> <span class="c">uv run python scripts/demo.py</span>        <span class="cm"># end-to-end synthetic world → demo_out/</span></span></pre>
+      </div>
+
+      <div class="console">
+        <div class="bar"><span class="tl"></span><span class="tl"></span><span class="tl"></span><span class="cap">command tour</span></div>
+        <pre><span class="l"><span class="p">$</span> <span class="c">uv run <b>govcon sf1408</b></span>            <span class="cm"># SF 1408 six-criteria self-check</span></span><span class="l"><span class="p">$</span> <span class="c">uv run <b>govcon audit verify</b></span>      <span class="cm"># recompute the audit-trail hash chain</span></span><span class="l"><span class="p">$</span> <span class="c">uv run <b>govcon contract 1</b></span>        <span class="cm"># one contract, inception to present</span></span><span class="l"><span class="p">$</span> <span class="c">uv run <b>govcon export 2026 G</b></span>     <span class="cm"># render a schedule (--format md|xlsx)</span></span><span class="l"><span class="p">$</span> <span class="c">uv run <b>govcon reverify</b></span>          <span class="cm"># regulatory re-verification watch list</span></span><span class="l"><span class="p">$</span> <span class="c">uv run <b>govcon about</b></span>             <span class="cm"># the tool's own limitations, stated plainly</span></span></pre>
+      </div>
+      <p class="note">Database defaults to <b>sqlite:///govcon.db</b> — override anything with the <b>GOVCON_DB_URL</b> environment variable.</p>
+    </section>
+
+    <!-- ENGINEERING SIGNALS -->
+    <section class="plate reveal">
+      <p class="eyebrow">Why it's trustworthy</p>
+      <h2>Built to be defended under audit</h2>
+
+      <div class="signals">
+        <div class="sig">
+          <h4>Dated regulatory thresholds</h4>
+          <p>Every dollar figure carries its effective date, source citation, and legal status — surfaced, never presented as settled law.</p>
+          <div class="pills"><span class="pill stat">statute</span><span class="pill prop">proposed_rule</span><span class="pill dev">final_rule</span><span class="pill">class_deviation</span></div>
+        </div>
+        <div class="sig">
+          <h4>Penny-exact by construction</h4>
+          <p>Decimal end to end via a custom SQLAlchemy type that stays lossless on SQLite — floats are rejected at the bind boundary, not tolerated.</p>
+        </div>
+        <div class="sig">
+          <h4>Every number reproduces</h4>
+          <p>Rate runs, Eichleay claims, and TINA sweeps store their inputs, so any historical figure recomputes from its own record — proven by tests that mutate the world afterward.</p>
+        </div>
+        <div class="sig">
+          <div class="big num">2 + 3</div>
+          <h4>Adversarially stress-tested</h4>
+          <p>A four-agent adversarial pass found and fixed two critical and three high-severity bugs in the author's own tool — each pinned by a regression test.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p class="disc">This is a personal learning and portfolio build on synthetic data only. It demonstrates a working command of GovCon cost-accounting logic; it is not a certified accounting system and is not a substitute for professional audit or legal judgment.</p>
+      <a href="https://github.com/tjaiyen/govcon-compliance-engine">github.com/tjaiyen/govcon-compliance-engine ↗</a>
+    </footer>
+
+  </div>
+</div>
+</body>
+</html>

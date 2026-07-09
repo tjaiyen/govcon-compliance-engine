@@ -4,6 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 
+📐 **[Visual blueprint — what it does & how to run it](https://tjaiyen.github.io/govcon-compliance-engine/)**
+
 A personal, local-first **GovCon cost-accounting compliance engine**: FAR
 Part 31 allowability, SF 1408 structural checks, three-tier indirect rates,
 ICS/ICE schedules, CAS/TINA dated thresholds, TINA sweeps, REA/CDA, Eichleay,
