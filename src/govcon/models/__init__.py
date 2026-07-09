@@ -3,6 +3,7 @@ govcon.db.base.Base.metadata (Alembic's target_metadata)."""
 
 from govcon.models.audit_trail import AuditTrail
 from govcon.models.billing import ICESchedule, PayrollRegister, Voucher
+from govcon.models.claims import EichleayClaim, REACDAAction, REACDALineItem
 from govcon.models.contracts import CONTRACT_FROZEN_COLUMNS, Contract, ContractAction
 from govcon.models.exceptions_ref import ContractClauseException, GSAPerDiemRate
 from govcon.models.ledger import GLAccount, GLTransaction, JCLEntry
@@ -25,6 +26,7 @@ __all__ = [
     "ContractAction",
     "ContractClauseException",
     "CostAccountingPractice",
+    "EichleayClaim",
     "ForwardPricingRateAgreement",
     "GSAPerDiemRate",
     "PracticeChangeEvent",
@@ -38,6 +40,8 @@ __all__ = [
     "Person",
     "RateCalculationRun",
     "RateTrueUp",
+    "REACDAAction",
+    "REACDALineItem",
     "RegulatoryThreshold",
     "TINABaseline",
     "TINABaselineAssumption",

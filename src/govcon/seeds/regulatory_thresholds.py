@@ -127,4 +127,17 @@ SEED_ROWS: list[dict] = [
         status="final_rule",
         source_citation="Final rule 91 FR 42139 (2026-07-08), rescinds CAS 411 eff. 2026-08-07",
     ),
+    # --- CDA claim certification threshold (reg-ref §7; seeded by 0008) ---
+    dict(
+        rule_name="CDA_CLAIM_CERT",
+        value=Decimal("100000.00"),
+        effective_date=None,
+        superseded_date=None,
+        status="statute",
+        source_citation=(
+            "FAR 33.207 / 41 U.S.C. 7103(f) per Reg-Ref §7: CDA claims over "
+            "$100,000 require certification; CO decides within 60 days for "
+            "claims at/below, or sets a firm date for larger claims"
+        ),
+    ),
 ]
