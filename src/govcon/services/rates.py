@@ -58,6 +58,87 @@ def compute_direct_labor_base(session: Session, fiscal_year: int) -> Decimal:
     return sum((Decimal(a) for a in amounts), Decimal("0.00"))
 
 
+def compute_total_company_labor_base(session: Session, fiscal_year: int) -> Decimal:
+    """§5 'Total Company Labor Base' (the Fringe denominator): ALL labor —
+    direct, overhead, and G&A — identified by gl_accounts.is_labor (the
+    v1.1 flag; nothing else can find labor among indirect accounts)."""
+    from govcon.models import GLAccount, GLTransaction, Period
+
+    amounts = session.execute(
+        sa.select(GLTransaction.amount)
+        .join(GLAccount, GLTransaction.account_id == GLAccount.account_id)
+        .join(Period, GLTransaction.period_id == Period.period_id)
+        .where(GLAccount.is_labor.is_(True))
+        .where(Period.fiscal_year == fiscal_year)
+    ).scalars()
+    return sum((Decimal(a) for a in amounts), Decimal("0.00"))
+
+
+def _approved_rate(
+    session: Session, pool_name, fiscal_year: int, rate_type
+) -> Decimal:
+    from govcon.models.enums import PoolStatus as _PS
+
+    rate = session.execute(
+        sa.select(IndirectPool.calculated_rate)
+        .where(IndirectPool.pool_name == pool_name)
+        .where(IndirectPool.fiscal_year == fiscal_year)
+        .where(IndirectPool.rate_type == rate_type)
+        .where(IndirectPool.status.in_([_PS.APPROVED, _PS.LOCKED]))
+        .limit(1)
+    ).scalar_one_or_none()
+    if rate is None:
+        raise RateCalculationError(
+            f"no approved {pool_name.value} {rate_type.value} rate for "
+            f"FY{fiscal_year} — derive/approve upstream rates first (§5 chains "
+            "fringe → overhead → G&A); do not substitute a guess"
+        )
+    return Decimal(rate)
+
+
+def derive_pool_base(session: Session, pool: IndirectPool) -> Decimal:
+    """Derive and SET allocation_base_amount from the ledger per the §5
+    base definitions (v1.1 option — entered bases remain valid):
+
+    fringe   → Total Company Labor Base (all is_labor accounts)
+    overhead → Direct Labor Base + allocated fringe (fringe rate × DL base)
+    ga       → Total Cost Input: DL + direct materials/ODCs (all other JCL
+               elements) + allocated fringe + allocated overhead
+    """
+    from govcon.models.enums import PoolName
+
+    direct_labor = compute_direct_labor_base(session, pool.fiscal_year)
+    if pool.pool_name == PoolName.FRINGE:
+        base = compute_total_company_labor_base(session, pool.fiscal_year)
+    elif pool.pool_name == PoolName.OVERHEAD:
+        fringe_rate = _approved_rate(session, PoolName.FRINGE, pool.fiscal_year, pool.rate_type)
+        base = direct_labor + direct_labor * fringe_rate
+    else:  # GA — Total Cost Input (§5)
+        from govcon.models import Period
+
+        other_direct = sum(
+            (
+                Decimal(a)
+                for a in session.execute(
+                    sa.select(JCLEntry.amount)
+                    .join(Period, JCLEntry.period_id == Period.period_id)
+                    .where(Period.fiscal_year == pool.fiscal_year)
+                    .where(JCLEntry.cost_element != CostElement.LABOR)
+                ).scalars()
+            ),
+            Decimal("0.00"),
+        )
+        fringe_rate = _approved_rate(session, PoolName.FRINGE, pool.fiscal_year, pool.rate_type)
+        oh_rate = _approved_rate(session, PoolName.OVERHEAD, pool.fiscal_year, pool.rate_type)
+        allocated_fringe = direct_labor * fringe_rate
+        allocated_oh = (direct_labor + allocated_fringe) * oh_rate
+        base = direct_labor + other_direct + allocated_fringe + allocated_oh
+
+    pool.allocation_base_amount = quantize_money(base)
+    session.flush()
+    return pool.allocation_base_amount
+
+
 def calculate_pool_rate(session: Session, pool: IndirectPool) -> RateCalculationRun:
     """Compute a pool's rate: numerator from the ledger (criterion-D
     filtered), denominator = the pool's defined base. Stamps the run."""

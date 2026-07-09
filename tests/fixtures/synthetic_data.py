@@ -200,9 +200,10 @@ def per_diem_rate_seattle() -> "GSAPerDiemRate":
 
 
 def synthetic_exec_comp_cap() -> "RegulatoryThreshold":
-    """CLEARLY-SYNTHETIC cap row for tests only. The real statutory value is
-    not in the verified regulatory reference, so production seeds none —
-    never promote this number anywhere (see services/compensation.py)."""
+    """CLEARLY-SYNTHETIC cap row for tests only, occupying CY2026 — the year
+    whose official BBA §702 amount was NOT yet published in a primary source
+    (migration 0012 seeds verified CY2024/CY2025 and deliberately leaves
+    2026 open). Never promote this number anywhere."""
     from govcon.models import RegulatoryThreshold
     from govcon.models.enums import ThresholdStatus
 
@@ -240,6 +241,7 @@ def seed_all(session: Session) -> SeededData:
         account_code="5000",
         account_name="Direct Labor",
         cost_type=CostType.DIRECT,
+        is_labor=True,
     )
     acct_fringe = GLAccount(
         account_code="6100",

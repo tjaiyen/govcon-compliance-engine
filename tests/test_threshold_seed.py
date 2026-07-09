@@ -54,8 +54,22 @@ def test_statuses_are_load_bearing(session):
 
 
 def test_missing_threshold_raises_not_invents(session):
+    # A rule that has never existed:
+    with pytest.raises(LookupError, match="do not invent"):
+        threshold_in_force(session, "NO_SUCH_RULE", d("2026-07-08"))
+    # And a rule whose CY2026 value is real but unpublished at verification
+    # time (the CY2025 EXEC_COMP_CAP row is deliberately superseded at
+    # 2026-01-01) — same refusal, never an extrapolation:
     with pytest.raises(LookupError, match="do not invent"):
         threshold_in_force(session, "EXEC_COMP_CAP", d("2026-07-08"))
+
+
+def test_exec_comp_cap_verified_years(session):
+    """The OMB/OFPP-verified BBA §702 amounts (migration 0012)."""
+    assert threshold_in_force(session, "EXEC_COMP_CAP", d("2024-06-01")).value == Decimal("646000.00")
+    row_2025 = threshold_in_force(session, "EXEC_COMP_CAP", d("2025-06-01"))
+    assert row_2025.value == Decimal("671000.00")
+    assert row_2025.status.value == "statute"
 
 
 def test_seed_constants_match_db_rows(session):

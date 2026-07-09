@@ -43,6 +43,10 @@ class GLAccount(Base):
     cost_type: Mapped[CostType] = mapped_column(
         db_enum(CostType, "cost_type"), nullable=False
     )
+    # Labor identification ACROSS cost types (§0.1, v1.1): the §5 "Total
+    # Company Labor Base" sums labor everywhere — direct, overhead, and G&A —
+    # and only this flag can find labor among indirect accounts.
+    is_labor: Mapped[bool] = mapped_column(default=False, nullable=False)
     pool_assignment: Mapped[int | None] = mapped_column(
         sa.ForeignKey("indirect_pools.pool_id")
     )

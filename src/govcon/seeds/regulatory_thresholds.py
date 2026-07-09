@@ -140,4 +140,37 @@ SEED_ROWS: list[dict] = [
             "claims at/below, or sets a firm date for larger claims"
         ),
     ),
+    # --- Executive/employee compensation cap (FAR 31.205-6(p); seeded by 0012) ---
+    # BBA §702 cap (Pub. L. 113-67), codified 10 U.S.C. 2324(e)(1)(P) /
+    # 41 U.S.C. 4304(a)(16), ECI-adjusted annually. Verified 2026-07-08 against
+    # the OMB/OFPP table (Nov 2024 update, whitehouse.gov). The CY2026 amount
+    # was NOT published in a primary source at verification time (consultant
+    # ESTIMATES ~$695K are not seedable) — so the CY2025 row is superseded at
+    # 2026-01-01 and 2026 lookups RAISE until the official number lands via a
+    # new migration. That gap sits on the `govcon reverify` watch list.
+    dict(
+        rule_name="EXEC_COMP_CAP",
+        value=Decimal("646000.00"),
+        effective_date="2024-01-01",
+        superseded_date="2025-01-01",
+        status="statute",
+        source_citation=(
+            "BBA §702 cap, costs incurred CY2024: OMB/OFPP Contractor "
+            "Compensation Cap table (Nov 2024 update, whitehouse.gov); "
+            "10 U.S.C. 2324(e)(1)(P) / 41 U.S.C. 4304(a)(16)"
+        ),
+    ),
+    dict(
+        rule_name="EXEC_COMP_CAP",
+        value=Decimal("671000.00"),
+        effective_date="2025-01-01",
+        superseded_date="2026-01-01",
+        status="statute",
+        source_citation=(
+            "BBA §702 cap, costs incurred CY2025 (3.9% ECI escalation): OMB/OFPP "
+            "Contractor Compensation Cap table (Nov 2024 update, whitehouse.gov). "
+            "CY2026 amount not yet published in a primary source as of 2026-07-08 "
+            "— deliberately unseeded; re-verify"
+        ),
+    ),
 ]

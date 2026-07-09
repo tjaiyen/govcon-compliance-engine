@@ -129,9 +129,11 @@ def test_under_cap_reclassifies_nothing(session):
     )
 
 
-def test_unseeded_cap_raises_not_invents(session):
-    """Production seeds no EXEC_COMP_CAP (value absent from the verified
-    reg file) — the tracker flags the open question, never invents."""
+def test_unverified_year_raises_not_invents(session):
+    """Migration 0012 seeds the VERIFIED CY2024/CY2025 caps ($646K/$671K,
+    OMB/OFPP table) but deliberately leaves CY2026 open — no primary source
+    had published it at verification time. A 2026 lookup without the
+    synthetic test row raises rather than extrapolating."""
     data = seed_all(session)
     with pytest.raises(LookupError, match="do not invent"):
         exec_comp_status(session, data.exec_person, 2026, AS_OF)
