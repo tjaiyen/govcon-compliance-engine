@@ -91,11 +91,32 @@ def test_tina_above_bar_required(session_factory):
     r = c.post("/api/tina", json={
         "action_date": "2026-08-01",
         "proposed_value": "12000000.00",
+        # "required" means all four statutory exceptions EVALUATED False —
+        # stated explicitly; omitted fields mean "not yet evaluated".
+        "tina_exception_adequate_price_competition": False,
+        "tina_exception_commercial_product_service": False,
+        "tina_exception_prices_set_by_law": False,
+        "tina_exception_waiver_granted": False,
     })
     body = r.json()
     assert body["above_threshold"] is True
     assert body["certification_required"] is True
     assert body["reasons"]
+
+
+def test_tina_omitted_exceptions_are_pending_not_assumed(session_factory):
+    """The honest tri-state default: omitting the exception fields means
+    'not yet evaluated' — the answer is pending (null), never an implicit
+    'all False → required' overclaim."""
+    c = client(session_factory)
+    r = c.post("/api/tina", json={
+        "action_date": "2026-08-01",
+        "proposed_value": "12000000.00",
+    })
+    body = r.json()
+    assert body["above_threshold"] is True
+    assert body["certification_required"] is None
+    assert len(body["unevaluated_exceptions"]) == 4
 
 
 def test_tina_exception_waives(session_factory):
