@@ -1,5 +1,9 @@
 # govcon-engine
 
+[![CI](https://github.com/tjaiyen/govcon-compliance-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/tjaiyen/govcon-compliance-engine/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+
 A personal, local-first **GovCon cost-accounting compliance engine**: FAR
 Part 31 allowability, SF 1408 structural checks, three-tier indirect rates,
 ICS/ICE schedules, CAS/TINA dated thresholds, TINA sweeps, REA/CDA, Eichleay,
@@ -80,7 +84,7 @@ src/govcon/
               variances, exporters, contract statement, SF 1408 self-check
   seeds/      regulatory threshold + FAR 31.205 category constants (drift-tested
               against the frozen migration seeds)
-alembic/      13 migrations; triggers created alongside the tables they guard
+alembic/      14 migrations; triggers created alongside the tables they guard
 tests/        every business rule asserted at BOTH layers (ORM error + raw-SQL
               IntegrityError from the trigger)
 ```
