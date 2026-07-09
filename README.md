@@ -21,4 +21,9 @@ uv sync
 uv run alembic upgrade head   # or: uv run govcon db upgrade
 uv run pytest
 uv run govcon --help
+uv run govcon sf1408          # SF 1408 six-criteria self-check (exit 1 on fail)
+uv run govcon about           # this tool's own limitations
+uv run govcon audit verify    # recompute the audit-trail hash chain
+uv run govcon reverify        # regulatory re-verification checkpoints/watch list
+uv run govcon export 2026 G   # render a generated ICE schedule to markdown
 ```

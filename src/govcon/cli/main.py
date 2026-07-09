@@ -40,6 +40,68 @@ def about() -> None:
 
 
 @app.command()
+def export(
+    fiscal_year: int,
+    schedule_type: str,
+    out: str = typer.Option(None, help="Output file path; prints to stdout when omitted."),
+) -> None:
+    """Render a generated ICE schedule to markdown (export-format decision
+    2026-07-08: markdown first; Excel is the committed next exporter)."""
+    import sqlalchemy as sa
+
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.models import ICESchedule
+    from govcon.services.export import render_schedule
+
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        row = session.execute(
+            sa.select(ICESchedule)
+            .where(ICESchedule.fiscal_year == fiscal_year)
+            .where(ICESchedule.schedule_type == schedule_type.upper())
+            .order_by(ICESchedule.schedule_id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            typer.echo(
+                f"no generated Schedule {schedule_type.upper()} for FY{fiscal_year} — "
+                "generate it first (generation requires the year fully closed)",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        rendered = render_schedule(row)
+    if out:
+        with open(out, "w") as fh:
+            fh.write(rendered)
+        typer.echo(f"wrote {out}")
+    else:
+        typer.echo(rendered)
+
+
+@app.command()
+def reverify() -> None:
+    """List regulatory re-verification items (date checkpoints + every
+    non-final threshold row); exit 1 when a date checkpoint has passed."""
+    import datetime
+
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.services.reverification import reverification_items
+
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        items = reverification_items(session, datetime.date.today())
+    any_due = False
+    for item in items:
+        flag = "DUE" if item.due else ("watch" if item.kind == "non_final_threshold" else "not yet")
+        typer.echo(f"[{flag}] {item.description}")
+        any_due = any_due or item.due
+    if any_due:
+        typer.echo("re-verification due — check primary sources and land a new "
+                   "threshold migration if anything moved", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def sf1408() -> None:
     """Run the SF 1408 six-criteria structural self-check against the
     current database state; exit 1 on any failed criterion."""
