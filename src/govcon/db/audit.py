@@ -61,10 +61,16 @@ def compute_entry_hash(payload: dict) -> str:
 
 
 def _pk_of(obj) -> str:
-    values = sa.inspect(obj).identity
-    if values is None:  # pragma: no cover - identity always set after flush
-        return "?"
-    return "/".join(str(v) for v in values)
+    """Primary key as text. Reads the PK column ATTRIBUTES (populated by the
+    time after_flush runs for inserts) — InstanceState.identity is NOT yet
+    set inside after_flush, which made this silently return '?' for every
+    insert until a v1.1 test caught it (new_values always carried the real
+    pk, so the chain stayed complete — record_id was the degraded field)."""
+    mapper = sa.inspect(obj).mapper
+    values = [
+        getattr(obj, mapper.get_property_by_column(col).key) for col in mapper.primary_key
+    ]
+    return "/".join("?" if v is None else str(v) for v in values)
 
 
 def _column_values(obj) -> dict:

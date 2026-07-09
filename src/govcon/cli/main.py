@@ -43,10 +43,11 @@ def about() -> None:
 def export(
     fiscal_year: int,
     schedule_type: str,
-    out: str = typer.Option(None, help="Output file path; prints to stdout when omitted."),
+    out: str = typer.Option(None, help="Output file path; prints to stdout when omitted (md only)."),
+    format: str = typer.Option("md", help="md | xlsx (xlsx requires --out)."),
 ) -> None:
-    """Render a generated ICE schedule to markdown (export-format decision
-    2026-07-08: markdown first; Excel is the committed next exporter)."""
+    """Render a generated ICE schedule to markdown or Excel (export-format
+    decision 2026-07-08: markdown first, Excel committed next — both here)."""
     import sqlalchemy as sa
 
     from govcon.db.engine import make_engine, make_session_factory
@@ -69,7 +70,44 @@ def export(
                 err=True,
             )
             raise typer.Exit(code=1)
+        if format == "xlsx":
+            if not out:
+                typer.echo("--format xlsx requires --out <file.xlsx>", err=True)
+                raise typer.Exit(code=2)
+            from govcon.services.export_excel import render_schedule_xlsx
+
+            render_schedule_xlsx(row, out)
+            typer.echo(f"wrote {out}")
+            return
         rendered = render_schedule(row)
+    if out:
+        with open(out, "w") as fh:
+            fh.write(rendered)
+        typer.echo(f"wrote {out}")
+    else:
+        typer.echo(rendered)
+
+
+@app.command()
+def contract(
+    contract_id: int,
+    out: str = typer.Option(None, help="Write markdown to this path instead of stdout."),
+) -> None:
+    """The complete financial picture of one contract, inception to present
+    (audit-defense checklist #10)."""
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.models import Contract
+    from govcon.services.contract_statement import contract_statement
+    from govcon.services.export import render_markdown
+
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        row = session.get(Contract, contract_id)
+        if row is None:
+            typer.echo(f"no contract {contract_id}", err=True)
+            raise typer.Exit(code=1)
+        statement = contract_statement(session, row)
+    rendered = render_markdown(f"Contract {contract_id} — Financial Statement", statement)
     if out:
         with open(out, "w") as fh:
             fh.write(rendered)

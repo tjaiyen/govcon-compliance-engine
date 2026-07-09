@@ -29,6 +29,10 @@ def test_inserts_are_audited(session):
     assert len(rows) == 3  # direct, indirect, unallowable fixtures
     new_values = json.loads(rows[0].new_values)
     assert new_values["amount"] == "1250.00"  # canonical Decimal text
+    # record_id carries the REAL pk (a v1.1 fix — identity isn't set inside
+    # after_flush; the pk attribute is):
+    assert rows[0].record_id == str(data.txn_direct.transaction_id)
+    assert rows[0].record_id != "?"
     assert _audit_rows(session, "contracts", "insert")  # every table captured
 
 
