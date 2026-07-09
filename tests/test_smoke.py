@@ -13,7 +13,7 @@ def test_package_imports():
     assert govcon.__version__
     from govcon.db.base import Base
 
-    assert len(Base.metadata.tables) == 34  # +3 P12: standard_costs, cost_variances, overhead_budgets
+    assert len(Base.metadata.tables) == 36  # +2 enterprise P1: decision_tables, decision_rules
 
 
 def test_migrated_db_connects_and_has_tables(engine):
