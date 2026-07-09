@@ -16,6 +16,7 @@ from govcon.models.reference import (
     UnallowableCostCategory,
 )
 from govcon.models.regulatory import RegulatoryThreshold
+from govcon.models.tina import TINABaseline, TINABaselineAssumption, TINASweepFinding
 
 __all__ = [
     "AuditTrail",
@@ -38,6 +39,9 @@ __all__ = [
     "RateCalculationRun",
     "RateTrueUp",
     "RegulatoryThreshold",
+    "TINABaseline",
+    "TINABaselineAssumption",
+    "TINASweepFinding",
     "UnallowableCostCategory",
     "Voucher",
 ]
