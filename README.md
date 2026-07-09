@@ -1,29 +1,86 @@
 # govcon-engine
 
-A personal, local-first GovCon cost-accounting compliance engine — FAR Part 31
-allowability, SF 1408 structural checks, indirect rates, ICS/ICE schedules,
-CAS/TINA dated thresholds, REA/CDA, Eichleay — operating on **synthetic data
-only**, with an append-only, hash-chained audit trail underneath everything.
+A personal, local-first **GovCon cost-accounting compliance engine**: FAR
+Part 31 allowability, SF 1408 structural checks, three-tier indirect rates,
+ICS/ICE schedules, CAS/TINA dated thresholds, TINA sweeps, REA/CDA, Eichleay,
+PBR monitoring, audit-response deadlines, and standard costing & variance
+analysis — operating on **synthetic data only**, with an append-only,
+SHA-256 hash-chained audit trail underneath everything.
 
-**SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE.** This is a learning/portfolio
-build. It is not a certified accounting system, holds no real contract or
-CUI/ITAR data, and is not a substitute for professional audit/legal judgment.
+**SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE.** This is a learning and
+portfolio build. It is not a certified accounting system, holds no real
+contract or CUI/ITAR data, and is not a substitute for professional audit or
+legal judgment. Run `govcon about` for the tool's own limitations statement.
+
+## What it demonstrates
+
+1. **Compliance at the edge** — every rule is enforced at write time, at two
+   layers: a service that raises a typed, explanatory error, backed by a
+   database trigger/constraint that refuses raw SQL. Direct/indirect
+   segregation, append-only ledgers, contract-field immutability, the
+   closed-period gate, the management-review sign-off — all of it.
+2. **Dated regulatory thresholds, never scalars** — the 2026 NDAA resets
+   (TINA $2.5M→$10M, CAS $7.5M→$35M/$50M→$100M) are `regulatory_thresholds`
+   rows with effective dates, statuses (statute / proposed_rule /
+   class_deviation / final_rule — surfaced, never presented as settled law),
+   and source citations. The same $12M contract is modified CAS coverage
+   awarded 2026-06-30 and none awarded 2026-07-01.
+3. **Every number defends itself later** — rate calculations stamp their
+   inputs (`reconstruct_run` reproduces any historical figure from the stamp
+   alone), Eichleay claims store their inputs, TINA sweeps log every
+   comparison including non-matches and the match method, and the audit
+   trail's hash chain detects out-of-band edits (`govcon audit verify`).
+4. **Penny-exact Decimal end to end** — a custom SQLAlchemy type keeps
+   `decimal.Decimal` lossless on SQLite (plain NUMERIC round-trips through
+   float); floats are rejected at bind time.
 
 The authoritative spec lives in the Obsidian vault
 `~/Obsidian/TJ_Vault/govcon-compliance-engine/02 - Context/` (read
-`00_HANDOFF_BUILD_SPEC.md` first). This repo deliberately lives OFF-vault —
-see the 2026-07-08 code-location decision note there.
+`00_HANDOFF_BUILD_SPEC.md` first). This repo deliberately lives OFF-vault.
 
-## Run
+## Quick start
 
 ```sh
 uv sync
-uv run alembic upgrade head   # or: uv run govcon db upgrade
-uv run pytest
+uv run pytest                      # 160+ tests, one per business rule minimum
+uv run python scripts/demo.py      # end-to-end synthetic world → demo_out/
+```
+
+The demo migrates a fresh `demo.db`, posts costs through the real write path
+(allowability vectors stamped at capture), derives a fringe rate from the
+ledger, closes the period through the gated three-way reconciliation,
+generates Schedules G/H/I/N, and renders them to markdown (and an
+audit-report note into the Obsidian vault when present).
+
+## Command tour
+
+```sh
 uv run govcon --help
-uv run govcon sf1408          # SF 1408 six-criteria self-check (exit 1 on fail)
-uv run govcon about           # this tool's own limitations
-uv run govcon audit verify    # recompute the audit-trail hash chain
-uv run govcon reverify        # regulatory re-verification checkpoints/watch list
-uv run govcon export 2026 G   # render a generated ICE schedule to markdown
+uv run govcon db upgrade                 # alembic upgrade head
+uv run govcon sf1408                     # SF 1408 six-criteria self-check (exit 1 on fail)
+uv run govcon audit verify               # recompute the audit-trail hash chain
+uv run govcon reverify                   # regulatory re-verification checkpoints + watch list
+uv run govcon export 2026 G              # render a generated schedule (--format md|xlsx)
+uv run govcon contract 1                 # complete financial picture of a contract
+uv run govcon about                      # the tool's own limitations, stated plainly
+```
+
+Database URL defaults to `sqlite:///govcon.db` (gitignored); override with
+`GOVCON_DB_URL`.
+
+## Layout
+
+```
+src/govcon/
+  core/       decimal config (the ONE place precision is set), errors, logging
+  db/         SafeNumeric type, session guards, hash-chained audit listener
+  models/     34 tables (SQLAlchemy 2.0, Postgres-compatible schema)
+  services/   allowability, rates, period close, ICE schedules, CAS/TINA,
+              sweeps, REA/CDA, Eichleay, PBR monitoring, audit response,
+              variances, exporters, contract statement, SF 1408 self-check
+  seeds/      regulatory threshold + FAR 31.205 category constants (drift-tested
+              against the frozen migration seeds)
+alembic/      13 migrations; triggers created alongside the tables they guard
+tests/        every business rule asserted at BOTH layers (ORM error + raw-SQL
+              IntegrityError from the trigger)
 ```
