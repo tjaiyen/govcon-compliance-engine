@@ -46,6 +46,12 @@ TINA_EXCEPTIONS = (
 def _status_caveat(row: RegulatoryThreshold) -> str | None:
     if row.status == ThresholdStatus.FINAL_RULE:
         return None
+    if row.status == ThresholdStatus.CARRY_FORWARD:
+        return (
+            f"threshold {row.rule_name}={row.value} is carried forward — the prior-period "
+            "value still governs because its scheduled adjustment was formally waived; confirm "
+            f"the freeze remains in effect before external reliance (source: {row.source_citation})"
+        )
     return (
         f"threshold {row.rule_name}={row.value} is {row.status.value}, not settled "
         "final regulation — surface this status, do not present as settled law "

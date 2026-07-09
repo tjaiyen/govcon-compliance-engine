@@ -42,6 +42,13 @@ class ThresholdStatus(str, enum.Enum):
     PROPOSED_RULE = "proposed_rule"
     FINAL_RULE = "final_rule"
     CLASS_DEVIATION = "class_deviation"
+    # In force by carry-forward: the prior-period value still governs because a
+    # scheduled periodic adjustment was formally waived/frozen by an authority
+    # (e.g. an OMB memo cancelling an annual inflation adjustment). Distinct from
+    # a settled value AND from an unseeded gap (which raises) — a carried-forward
+    # row returns a real value but is non-final, so it rides a caveat and the
+    # reverify watch list until the freeze lifts. Never a value invented in code.
+    CARRY_FORWARD = "carry_forward"
 
 
 class CostType(str, enum.Enum):

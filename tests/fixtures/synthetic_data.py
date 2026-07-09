@@ -216,6 +216,34 @@ def synthetic_exec_comp_cap() -> RegulatoryThreshold:
     )
 
 
+def synthetic_carry_forward_cap() -> RegulatoryThreshold:
+    """CLEARLY-SYNTHETIC carry_forward row for tests only, occupying CY2027 —
+    it exercises the carry_forward status (value in force because a scheduled
+    adjustment was formally waived) without asserting any real freeze.
+
+    It illustrates the pattern by analogy to OMB M-26-11 (which cancelled the
+    2026 federal *civil-penalty* inflation adjustment). That memo does NOT
+    govern the exec-comp cap (ECI/OMB-OFPP, a different mechanism), so this is
+    a fixture only — never a real seeded cap value or a real freeze of this
+    figure. Value carried forward from the verified CY2025 cap ($671K)."""
+    from govcon.models import RegulatoryThreshold
+    from govcon.models.enums import ThresholdStatus
+
+    return RegulatoryThreshold(
+        rule_name="EXEC_COMP_CAP",
+        value=Decimal("671000.00"),
+        effective_date=datetime.date(2027, 1, 1),
+        superseded_date=None,  # still in force → appears on the reverify watch list
+        status=ThresholdStatus.CARRY_FORWARD,
+        source_citation=(
+            "SYNTHETIC TEST FIXTURE — illustrates the carry-forward pattern "
+            "(cf. OMB M-26-11, which froze the 2026 civil-penalty inflation "
+            "adjustment); NOT a verified exec-comp cap value or a real freeze "
+            "of this figure"
+        ),
+    )
+
+
 def seed_all(session: Session) -> SeededData:
     """Seed the full deterministic matrix and return handles."""
     contracts = {
