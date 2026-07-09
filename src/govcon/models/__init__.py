@@ -23,6 +23,7 @@ from govcon.models.reference import (
     UnallowableCostCategory,
 )
 from govcon.models.regulatory import RegulatoryThreshold
+from govcon.models.standard_costing import CostVariance, OverheadBudget, StandardCost
 from govcon.models.tina import TINABaseline, TINABaselineAssumption, TINASweepFinding
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "ContractAction",
     "ContractClauseException",
     "CostAccountingPractice",
+    "CostVariance",
     "EichleayClaim",
     "ForwardPricingRateAgreement",
     "GSAPerDiemRate",
@@ -45,6 +47,7 @@ __all__ = [
     "ICESchedule",
     "JCLEntry",
     "IndirectPool",
+    "OverheadBudget",
     "PayrollRegister",
     "Period",
     "Person",
@@ -53,6 +56,7 @@ __all__ = [
     "REACDAAction",
     "REACDALineItem",
     "RegulatoryThreshold",
+    "StandardCost",
     "TINABaseline",
     "TINABaselineAssumption",
     "TINASweepFinding",
