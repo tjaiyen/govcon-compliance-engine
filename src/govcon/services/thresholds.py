@@ -14,6 +14,26 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from govcon.models import RegulatoryThreshold
+from govcon.models.enums import ThresholdStatus
+
+
+def status_caveat(row: RegulatoryThreshold) -> str | None:
+    """The status caveat that rides every determination built on a non-final
+    threshold row (ground rule 3). Shared by the direct CAS/TINA consumers and
+    the decision-table evaluator — one wording, one place."""
+    if row.status == ThresholdStatus.FINAL_RULE:
+        return None
+    if row.status == ThresholdStatus.CARRY_FORWARD:
+        return (
+            f"threshold {row.rule_name}={row.value} is carried forward — the prior-period "
+            "value still governs because its scheduled adjustment was formally waived; confirm "
+            f"the freeze remains in effect before external reliance (source: {row.source_citation})"
+        )
+    return (
+        f"threshold {row.rule_name}={row.value} is {row.status.value}, not settled "
+        "final regulation — surface this status, do not present as settled law "
+        f"(source: {row.source_citation})"
+    )
 
 
 def threshold_in_force(

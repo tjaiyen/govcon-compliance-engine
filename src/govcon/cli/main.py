@@ -18,8 +18,13 @@ app = typer.Typer(
 
 db_app = typer.Typer(help="Database migration commands.")
 audit_app = typer.Typer(help="Audit-trail commands.")
+rules_app = typer.Typer(
+    help="Decision-table (rules-as-data) explorer — read-only; rule changes "
+    "land as new table versions via migrations, never through the CLI."
+)
 app.add_typer(db_app, name="db")
 app.add_typer(audit_app, name="audit")
+app.add_typer(rules_app, name="rules")
 
 
 @app.command()
@@ -139,7 +144,15 @@ def reverify(
         items = reverification_items(session, datetime.date.today())
     any_due = False
     for item in items:
-        flag = "DUE" if item.due else ("watch" if item.kind == "non_final_threshold" else "not yet")
+        flag = (
+            "DUE"
+            if item.due
+            else (
+                "watch"
+                if item.kind in ("non_final_threshold", "non_final_decision_rule")
+                else "not yet"
+            )
+        )
         typer.echo(f"[{flag}] {item.description}")
         any_due = any_due or item.due
     if any_due:
@@ -169,6 +182,85 @@ def sf1408() -> None:
     typer.echo("SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE")
     if failed:
         raise typer.Exit(code=1)
+
+
+@rules_app.command("list")
+def rules_list() -> None:
+    """List every decision-table version with its dated window."""
+    import sqlalchemy as sa
+
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.models import DecisionRule, DecisionTable
+
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        tables = session.execute(
+            sa.select(DecisionTable).order_by(
+                DecisionTable.table_name, DecisionTable.version
+            )
+        ).scalars()
+        for t in tables:
+            n_rules = session.execute(
+                sa.select(sa.func.count())
+                .select_from(DecisionRule)
+                .where(DecisionRule.decision_table_id == t.decision_table_id)
+            ).scalar()
+            window = (
+                f"{t.effective_date.isoformat() if t.effective_date else 'open'}"
+                f" → {t.superseded_date.isoformat() if t.superseded_date else 'open'}"
+            )
+            typer.echo(f"{t.table_name} v{t.version}  [{window}]  {n_rules} rules")
+            typer.echo(f"    {t.source_citation}")
+
+
+@rules_app.command("show")
+def rules_show(
+    name: str,
+    on: str = typer.Option(
+        None, help="ISO date the table must be in force on (default: today)."
+    ),
+) -> None:
+    """Show a table's rules in evaluation order, with per-rule provenance."""
+    import datetime
+    import json
+
+    import sqlalchemy as sa
+
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.models import DecisionRule
+    from govcon.services.decision_engine import table_in_force
+
+    on_date = datetime.date.fromisoformat(on) if on else datetime.date.today()
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        try:
+            table = table_in_force(session, name, on_date)
+        except LookupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from None
+        typer.echo(f"{table.table_name} v{table.version} — {table.description or ''}")
+        typer.echo(f"source: {table.source_citation}")
+        if table.threshold_context:
+            typer.echo(
+                f"thresholds: {json.dumps(table.threshold_context)} "
+                f"(resolution: {table.threshold_resolution})"
+            )
+        if table.initial_outcome is not None:
+            typer.echo(f"initial outcome: {json.dumps(table.initial_outcome)}")
+        rows = session.execute(
+            sa.select(DecisionRule)
+            .where(DecisionRule.decision_table_id == table.decision_table_id)
+            .order_by(DecisionRule.rule_order)
+        ).scalars()
+        for r in rows:
+            stop = "stop" if r.stop else "continue"
+            typer.echo(f"  {r.rule_order}. {r.rule_key} [{stop}]")
+            typer.echo(f"     when:    {json.dumps(r.when_ast)}")
+            typer.echo(f"     outcome: {json.dumps(r.outcome)}")
+            if r.status is not None:
+                typer.echo(
+                    f"     STATUS:  {r.status.value} — {r.source_citation}"
+                )
 
 
 @db_app.command("upgrade")

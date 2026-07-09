@@ -1,13 +1,17 @@
 """Regulatory re-verification checkpoints (Phase 10; tech-stack decision #5
 = manual reminders, no fragile web automation).
 
-Two sources of "go re-check the primary sources":
+Three sources of "go re-check the primary sources":
 1. DATE CHECKPOINTS transcribed from the roadmap's recurring list — events
    after which the reference file must be re-verified.
 2. NON-FINAL THRESHOLD ROWS straight from the database — anything whose
    status is not final_rule (class_deviation / statute / proposed_rule) is
    by definition still in motion (ground rule 3) and stays on the watch
    list until a superseding migration lands.
+3. NON-FINAL DECISION RULES (Phase 1 rules-as-data): a decision_rules row
+   whose per-rule status is non-final encodes regulation still in motion
+   (e.g. the CAS cumulative window's PROPOSED 9903.201-2 text) — the same
+   standing-watch discipline, extended from values to rule structure.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from govcon.models import RegulatoryThreshold
+from govcon.models import DecisionRule, DecisionTable, RegulatoryThreshold
 from govcon.models.enums import ThresholdStatus
 
 #: (trigger date, what to re-verify) — from 04_Build_Phases_Roadmap.md's
@@ -80,6 +84,30 @@ def reverification_items(
                 kind="non_final_threshold",
                 due=False,  # standing watch item, not date-triggered
                 description=description,
+            )
+        )
+    rule_rows = session.execute(
+        sa.select(DecisionRule, DecisionTable)
+        .join(
+            DecisionTable,
+            DecisionRule.decision_table_id == DecisionTable.decision_table_id,
+        )
+        .where(DecisionRule.status.is_not(None))
+        .where(DecisionRule.status != ThresholdStatus.FINAL_RULE)
+        .where(DecisionTable.superseded_date.is_(None))
+        .order_by(DecisionRule.rule_id)
+    ).all()
+    for rule, table in rule_rows:
+        items.append(
+            ReverificationItem(
+                kind="non_final_decision_rule",
+                due=False,  # standing watch item, not date-triggered
+                description=(
+                    f"decision rule {rule.rule_key} (table {table.table_name} "
+                    f"v{table.version}) is encoded from a {rule.status.value} authority — "
+                    "re-verify the source and supersede the table version via a migration "
+                    f"when it finalizes ({rule.source_citation})"
+                ),
             )
         )
     return items
