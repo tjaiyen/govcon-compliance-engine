@@ -2,11 +2,10 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+import govcon.models  # noqa: F401 - registers every table on Base.metadata
 from alembic import context
-
 from govcon.db.base import Base
 from govcon.db.engine import get_db_url
-import govcon.models  # noqa: F401 - registers every table on Base.metadata
 
 config = context.config
 

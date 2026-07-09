@@ -62,15 +62,24 @@ def reverification_items(
         .order_by(RegulatoryThreshold.threshold_id)
     ).scalars()
     for row in rows:
+        value_str = row.value if row.value is not None else "(status row)"
+        if row.status == ThresholdStatus.CARRY_FORWARD:
+            description = (
+                f"{row.rule_name} = {value_str} is carried forward (prior value still governs; "
+                "scheduled adjustment waived) — confirm the freeze is still in effect; seed the "
+                "new value via a migration once the adjustment resumes"
+            )
+        else:
+            description = (
+                f"{row.rule_name} = {value_str} is {row.status.value} — re-verify against the "
+                "primary source before external reliance; supersede via a new migration when it "
+                "finalizes"
+            )
         items.append(
             ReverificationItem(
                 kind="non_final_threshold",
                 due=False,  # standing watch item, not date-triggered
-                description=(
-                    f"{row.rule_name} = {row.value if row.value is not None else '(status row)'} "
-                    f"is {row.status.value} — re-verify against the primary source before "
-                    "external reliance; supersede via a new migration when it finalizes"
-                ),
+                description=description,
             )
         )
     return items
