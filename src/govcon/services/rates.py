@@ -63,6 +63,12 @@ def calculate_pool_rate(session: Session, pool: IndirectPool) -> RateCalculation
     filtered), denominator = the pool's defined base. Stamps the run."""
     from govcon.services.exclusions import pool_numerator_total
 
+    if pool.status == PoolStatus.LOCKED:
+        raise RateCalculationError(
+            f"pool {pool.pool_id} ({pool.pool_name.value} FY{pool.fiscal_year}) is "
+            "LOCKED by period close — no retroactive rate recalculation (§11 item 4); "
+            "a post-close correction is a new period-adjustment entry, never an edit"
+        )
     base = _require_base(pool)
     balance = pool_numerator_total(session, pool)
     rate = quantize_rate(balance / base)

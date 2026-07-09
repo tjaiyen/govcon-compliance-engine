@@ -35,7 +35,11 @@ def test_inserts_are_audited(session):
 def test_update_and_delete_are_audited(session):
     data = seed_all(session)
     session.commit()
-    # update (periods is not append-only)
+    # update (periods is not append-only; reconciliation must pass first —
+    # the §11 close-gate trigger from migration 0006 enforces it)
+    from govcon.models.enums import ReconciliationStatus
+
+    data.period_open.reconciliation_status = ReconciliationStatus.PASSED
     data.period_open.status = PeriodStatus.CLOSED
     session.commit()
     updates = _audit_rows(session, "periods", "update")
