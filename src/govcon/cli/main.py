@@ -195,5 +195,53 @@ def audit_verify() -> None:
         raise typer.Exit(code=1)
 
 
+@app.command()
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    demo: bool = typer.Option(
+        False,
+        "--demo",
+        help="Spin up a fresh, migrated (threshold-seeded) SQLite DB for a "
+        "zero-setup demo, instead of using GOVCON_DB_URL.",
+    ),
+) -> None:
+    """Run the guided web workbench (advisory, synthetic data) on localhost.
+
+    Open http://HOST:PORT in a browser. This is a decision-support & training
+    surface over the same compliance logic the CLI exposes — it explains and
+    teaches every determination; it is not a certified accounting system.
+    """
+    import os
+    import tempfile
+
+    if demo:
+        db_path = os.path.join(tempfile.mkdtemp(prefix="govcon-demo-"), "demo.db")
+        os.environ["GOVCON_DB_URL"] = f"sqlite:///{db_path}"
+        typer.echo(f"demo DB: {db_path} (migrating + seeding thresholds ...)")
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:  # pragma: no cover - surfaced to the user
+            typer.echo(result.stderr, err=True)
+            raise typer.Exit(code=1)
+
+    try:
+        import uvicorn
+    except ModuleNotFoundError:  # pragma: no cover - dependency guard
+        typer.echo(
+            "the web workbench needs the web extras: `uv sync` (fastapi + uvicorn)",
+            err=True,
+        )
+        raise typer.Exit(code=1) from None
+
+    from govcon.api import create_app
+
+    typer.echo(f"GovCon workbench (synthetic data) → http://{host}:{port}")
+    uvicorn.run(create_app(), host=host, port=port)
+
+
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
     app()
