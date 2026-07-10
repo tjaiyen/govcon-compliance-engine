@@ -445,6 +445,50 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       '<p class="hint">' + esc(b.notice || "") + "</p>" + cost;
     host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
   }
+  // SSE consumer (fetch + ReadableStream): renders determinations as they
+  // resolve, then the grounded prose. Same final DOM as renderGrounded. Falls
+  // back gracefully — the caller's .catch shows a retry message on any failure.
+  function streamGrounded(url, body, host) {
+    var dets = [], prose = "", grounding = { verified: true }, cost = null, stopped = false;
+    function paint() {
+      var badge = grounding.verified
+        ? '<span class="ask-badge grounded">grounded &#10003;</span>'
+        : '<span class="ask-badge withheld">explanation withheld</span>';
+      var detHtml = dets.filter(function (d) { return d && !d.is_error; }).map(renderDetermination).join("");
+      var costHtml = cost ? '<p class="ask-cost">' + esc(cost.calls) + " model call(s) &middot; $" + esc(cost.usd) + "</p>" : "";
+      host.innerHTML = badge +
+        (prose ? '<p class="ask-prose">' + esc(prose) + "</p>" : '<p class="muted">Working&hellip;</p>') +
+        (detHtml ? '<div class="why">The engine\'s determination (authoritative)</div>' + detHtml : "") + costHtml;
+    }
+    function handle(evt) {
+      if (evt.type === "unavailable") { host.innerHTML = '<p class="muted">The assistant is not enabled on this server' + (evt.reason ? " (" + esc(evt.reason) + ")" : "") + ".</p>"; stopped = true; }
+      else if (evt.type === "error") { host.innerHTML = '<p class="muted">' + (evt.cost_exceeded ? "That hit the cost ceiling before finishing." : esc(evt.message || "Something went wrong.")) + "</p>"; stopped = true; }
+      else if (evt.type === "determination") { dets.push(evt.determination); paint(); }
+      else if (evt.type === "grounding") { grounding = evt; }
+      else if (evt.type === "prose") { prose = evt.text; paint(); }
+      else if (evt.type === "cost") { cost = evt.cost; paint(); }
+    }
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (resp) {
+        var reader = resp.body.getReader(), decoder = new TextDecoder(), buf = "";
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) return;
+            buf += decoder.decode(r.value, { stream: true });
+            var parts = buf.split("\n\n"); buf = parts.pop();
+            parts.forEach(function (p) {
+              var s = p.trim();
+              if (s.indexOf("data: ") === 0) { try { handle(JSON.parse(s.slice(6))); } catch (e) {} }
+            });
+            return pump();
+          });
+        }
+        return pump().then(function () {
+          if (!stopped && !prose && !dets.length) host.innerHTML = '<p class="muted">No response.</p>';
+          host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+        });
+      });
+  }
   // generic submit wiring for an AI card: validate input, disable, POST, render
   function wireAiForm(formId, inputId, hostId, working, build) {
     $(formId).addEventListener("submit", function (e) {
@@ -461,12 +505,13 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   }
 
   wireAiForm("f-ask", "ask-q", "r-ask", "Asking the engine…", function (q, host) {
-    return post("/api/ask", { question: q }).then(function (b) { renderGrounded(host, b); });
+    // stream determinations + grounded prose as they resolve (SSE)
+    return streamGrounded("/api/ask?stream=1", { question: q }, host);
   });
 
   wireAiForm("f-tutor", "tutor-q", "r-tutor", "Teaching…", function (q, host) {
-    // routes through the persona selected in the persona bar above
-    return post("/api/tutor", { question: q, persona: persona }).then(function (b) { renderGrounded(host, b); });
+    // streams; routes through the persona selected in the persona bar above
+    return streamGrounded("/api/tutor?stream=1", { question: q, persona: persona }, host);
   });
 
   function renderDraftRule(host, b) {
