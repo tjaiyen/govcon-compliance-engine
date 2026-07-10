@@ -173,3 +173,14 @@ def test_stream_terminates_cleanly_on_unexpected_error(session_factory, syntheti
     # the generic message doesn't leak internals
     err = next(e for e in evts if e["type"] == "error")
     assert "exploded" not in err.get("message", "")
+
+
+def test_nonstreaming_ai_degrades_on_unexpected_error(session_factory, synthetic_mode):
+    # a raising client on a NON-streaming route (e.g. local model unreachable in
+    # real-data mode) → a clean error body, never a 500, no internals leaked.
+    c = TestClient(create_app(session_factory=session_factory, llm_client=_BoomClient()))
+    r = c.post("/api/draft-rule", json={"instruction": "hi"})  # always JSON
+    assert r.status_code == 200
+    b = r.json()
+    assert b["ai_available"] is True and b.get("error")
+    assert "exploded" not in b["error"]

@@ -160,6 +160,35 @@ def test_about_states_real_data_mode(session_factory, monkeypatch):
     assert "SYNTHETIC DATA ONLY" not in flat  # the synthetic claim is gone in real mode
 
 
+def test_response_notice_reflects_real_mode(session_factory, monkeypatch):
+    # the per-answer notice must NOT claim "synthetic" when running on real data
+    monkeypatch.setenv("GOVCON_DATA_MODE", "real")
+    fake = _LocalFake([
+        tool_turn(("t1", "determine_cas_coverage",
+                   {"award_date": "2026-05-15", "contract_value": "12000000.00",
+                    "contractor_size": "other_than_small"})),
+        final_turn("This $12,000,000.00 award has modified CAS coverage."),
+    ])
+    c = TestClient(create_app(session_factory=session_factory, llm_client=fake))
+    body = c.post("/api/ask", json={"question": "..."}).json()
+    assert "real data (local model)" in body["notice"]
+    assert "synthetic" not in body["notice"].lower()
+
+
+def test_narrative_banner_reflects_real_mode(session_factory, monkeypatch):
+    monkeypatch.setenv("GOVCON_DATA_MODE", "real")
+    fake = _LocalFake([
+        tool_turn(("t1", "determine_cas_coverage",
+                   {"award_date": "2026-05-15", "contract_value": "12000000.00",
+                    "contractor_size": "other_than_small"})),
+        final_turn("MEMO: This $12,000,000.00 award has modified CAS coverage."),
+    ])
+    c = TestClient(create_app(session_factory=session_factory, llm_client=fake))
+    body = c.post("/api/draft-narrative", json={"instruction": "..."}).json()
+    assert "REAL DATA (LOCAL MODEL)" in body["synthetic_banner"]
+    assert "NOT FOR FILING" in body["synthetic_banner"]
+
+
 def test_health_reports_data_mode(session_factory, monkeypatch):
     monkeypatch.setenv("GOVCON_DATA_MODE", "real")
     body = TestClient(create_app(session_factory=session_factory)).get("/health").json()

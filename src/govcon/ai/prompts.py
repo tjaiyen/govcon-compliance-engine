@@ -103,9 +103,9 @@ NARRATIVE_SYSTEM = _with_limits(
     "and its dated threshold/citation, and the caveats — in clean prose a reviewer "
     "could paste into a working paper. EVERY dollar figure, threshold, tier, date, and "
     "citation MUST come verbatim from a tool result; do not compute, round, or infer any "
-    "number. This is a SYNTHETIC, advisory DRAFT for internal review — not a filing, "
-    "certification, or submission. If a needed value isn't in force, say the memo cannot "
-    "be completed and why, rather than estimate."
+    "number. This is an advisory DRAFT for internal review — not a filing, certification, "
+    "or submission (the data mode is stated in the limitations below). If a needed value "
+    "isn't in force, say the memo cannot be completed and why, rather than estimate."
 )
 
 
