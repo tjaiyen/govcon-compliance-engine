@@ -62,6 +62,33 @@ def test_glossary_deeplink_opens_entry(page, live_server):
     expect(first).to_have_attribute("open", "")
 
 
+def test_tutor_flow_teaches_grounded_answer_at_persona(page, live_server):
+    page.goto(live_server)
+    page.click("#p-auditor")  # pick a persona → routes /api/tutor with it
+    page.fill("#tutor-q", "Why does a $12M award on 2026-05-15 get modified CAS?")
+    page.click("#f-tutor button[type=submit]")
+    result = page.locator("#r-tutor")
+    expect(result).to_contain_text("modified CAS coverage", ignore_case=True)
+    expect(result.locator(".ask-badge.grounded")).to_be_visible()
+
+
+def test_draft_rule_shows_human_migration_notice(page, live_server):
+    page.goto(live_server)
+    page.select_option("#draft-mode", "draft-rule")
+    page.fill("#draft-q", "Draft a rule for a new CAS full-coverage threshold")
+    page.click("#f-draft button[type=submit]")
+    # the never-auto-apply guardrail is always surfaced to the user
+    expect(page.locator("#r-draft")).to_contain_text("human-reviewed migration", ignore_case=True)
+
+
+def test_draft_narrative_shows_synthetic_banner(page, live_server):
+    page.goto(live_server)
+    page.select_option("#draft-mode", "draft-narrative")
+    page.fill("#draft-q", "Draft a memo on CAS for a $12M May-2026 award")
+    page.click("#f-draft button[type=submit]")
+    expect(page.locator("#r-draft")).to_contain_text("SYNTHETIC")
+
+
 def test_double_submit_button_disables_during_fetch(page, live_server):
     page.goto(live_server)
     page.fill("#c-date", "2026-05-15")
