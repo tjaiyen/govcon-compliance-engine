@@ -144,6 +144,18 @@ def test_cost_realism_card_computes_probable_cost(page, live_server):
     expect(result).to_contain_text("required")
 
 
+def test_fccm_card_computes_facilities_cost_of_money(page, live_server):
+    page.goto(live_server)
+    page.fill("#fccm-oh-b", "1000000")
+    page.fill("#fccm-oh-f", "0.00234")   # 1,000,000 × 0.00234 = 2,340
+    page.fill("#fccm-ga-b", "500000")
+    page.fill("#fccm-ga-f", "0.00110")   # 500,000 × 0.00110 = 550 ; total 2,890
+    page.click("#f-fccm button[type=submit]")
+    result = page.locator("#r-fccm")
+    expect(result).to_contain_text("Facilities capital cost of money $2890.00")
+    expect(result).to_contain_text("imputed")
+
+
 def test_double_submit_button_disables_during_fetch(page, live_server):
     page.goto(live_server)
     page.fill("#c-date", "2026-05-15")
