@@ -80,7 +80,7 @@ def test_scenarios_endpoint_serves_the_library(session_factory):
 
 
 def test_glossary_completeness_and_endpoint(session_factory):
-    assert len(GLOSSARY) == 17  # restated so shrinkage fails loudly (+3 FAR 15.404)
+    assert len(GLOSSARY) == 18  # restated so shrinkage fails loudly (+4 FAR 15.404, incl. cost realism)
     terms = [g["term"] for g in GLOSSARY]
     assert len(terms) == len(set(terms))
     for entry in GLOSSARY:

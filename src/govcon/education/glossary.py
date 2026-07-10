@@ -293,4 +293,24 @@ GLOSSARY: list[dict] = [
             "any factor outside its range."
         ),
     ),
+    dict(
+        term="cost realism / probable cost (FAR 15.404-1(d))",
+        plain=(
+            "Checking whether each proposed cost is realistic for the work, then "
+            "adjusting it to a 'probable cost' — what the job will most likely "
+            "actually cost — which is what the government evaluates instead of the "
+            "proposed number."
+        ),
+        why=(
+            "It is required on cost-reimbursement contracts (the government, not "
+            "the contractor, bears the overrun), so an unrealistically low bid "
+            "does not win by lowballing — it gets scored at its probable cost."
+        ),
+        example=(
+            "An offeror proposes $100,000 of labor, but the realistic level of "
+            "effort is $120,000; the $20,000 upward adjustment makes the probable "
+            "cost $120,000. The engine's /api/cost-realism totals each element's "
+            "probable cost and reports the adjustment."
+        ),
+    ),
 ]

@@ -127,6 +127,23 @@ def test_weighted_guidelines_folds_in_facilities_capital(page, live_server):
     expect(page.locator("#r-wg")).to_contain_text("Profit objective $455000.00")
 
 
+def test_cost_realism_card_computes_probable_cost(page, live_server):
+    page.goto(live_server)
+    page.select_option("#cr-type", "cpff")   # cost-reimbursement → realism required
+    page.fill("#cr-labor-p", "100000")
+    page.fill("#cr-labor-r", "120000")        # +20k adjustment
+    page.fill("#cr-mat-p", "50000")
+    page.fill("#cr-mat-r", "50000")
+    page.fill("#cr-oh-p", "0")
+    page.fill("#cr-oh-r", "0")
+    page.fill("#cr-ga-p", "0")
+    page.fill("#cr-ga-r", "0")
+    page.click("#f-cr button[type=submit]")
+    result = page.locator("#r-cr")
+    expect(result).to_contain_text("Probable cost $170000.00")
+    expect(result).to_contain_text("required")
+
+
 def test_double_submit_button_disables_during_fetch(page, live_server):
     page.goto(live_server)
     page.fill("#c-date", "2026-05-15")

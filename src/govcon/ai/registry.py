@@ -225,6 +225,31 @@ def _run_facilities_capital(session: Session, inp: dict) -> dict:
     }
 
 
+def _run_cost_realism(session: Session, inp: dict) -> dict:
+    from govcon.services.pricing_analysis import assess_cost_realism
+
+    try:
+        d = assess_cost_realism(
+            contract_type=inp["contract_type"],
+            cost_elements=list(inp.get("cost_elements") or []),
+        )
+    except (ValueError, InvalidOperation, KeyError, TypeError) as exc:
+        return {"available": False, "message": str(exc)}
+    return {
+        "available": True,
+        "contract_type": d.contract_type,
+        "realism_status": d.realism_status,
+        "proposed_cost": str(d.proposed_cost),
+        "probable_cost": str(d.probable_cost),
+        "total_adjustment": str(d.total_adjustment),
+        "adjustment_pct": str(d.adjustment_pct),
+        "element_findings": d.element_findings,
+        "reasons": d.reasons,
+        "caveats": d.caveats,
+        "source_citation": d.source_citation,
+    }
+
+
 def _run_threshold(session: Session, inp: dict) -> dict:
     try:
         row = threshold_in_force(session, inp["rule"], _date(inp["on"]))
@@ -457,6 +482,35 @@ TOOLS: dict[str, ToolSpec] = {
             run=_run_facilities_capital,
         ),
         ToolSpec(
+            name="assess_cost_realism",
+            description=(
+                "FAR 15.404-1(d): roll a proposal's cost elements up to a PROBABLE COST. "
+                "Cost realism is required on cost-reimbursement contracts (cpff/cpif/cpaf/"
+                "cost/cost_sharing) and the probable cost — not the proposed cost — is used "
+                "for evaluation. cost_elements is a list of {name, proposed, probable}."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "contract_type": {"type": "string"},
+                    "cost_elements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "proposed": {"type": "string"},
+                                "probable": {"type": "string"},
+                            },
+                            "required": ["proposed"],
+                        },
+                    },
+                },
+                "required": ["contract_type", "cost_elements"],
+            },
+            run=_run_cost_realism,
+        ),
+        ToolSpec(
             name="threshold_in_force",
             description=(
                 "Look up the dated regulatory threshold in force for a rule on a date, with its "
@@ -549,6 +603,7 @@ ASK_TOOLS = [
     "determine_subcontract_certified_data",
     "compute_weighted_guidelines_profit",
     "compute_facilities_capital_profit",
+    "assess_cost_realism",
     "threshold_in_force",
     "run_self_check",
     "reverification_items",
