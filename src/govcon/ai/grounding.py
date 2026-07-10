@@ -38,6 +38,14 @@ _MONEY = re.compile(
     r"\$?\s?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(million|billion|thousand|m|bn|k)?\b",
     re.IGNORECASE,
 )
+#: A currency unit word immediately AFTER a bare number ("50000 dollars") makes
+#: it a money claim regardless of size/formatting — closing the bare-integer
+#: hole below the _BARE_MONEY_FLOOR. Years/counts have no such unit word.
+_CURRENCY_WORD = re.compile(r"\s*(?:dollars?|usd)\b", re.IGNORECASE)
+
+
+def _trailing_currency(prose: str, end: int) -> bool:
+    return bool(_CURRENCY_WORD.match(prose[end:end + 12]))
 _SCALE = {
     "thousand": Decimal(1_000), "k": Decimal(1_000),
     "million": Decimal(1_000_000), "m": Decimal(1_000_000),
@@ -168,7 +176,7 @@ class GroundingVerifier:
                 # the ledger, so flag it whenever it looks money-sized — a $/
                 # scale word, or 6+ integer digits (≥ _BARE_MONEY_FLOOR).
                 int_digits = len(number.split(".")[0].replace(",", "").lstrip("0"))
-                if has_dollar or scale or int_digits >= 6:
+                if has_dollar or scale or int_digits >= 6 or _trailing_currency(prose, m.end()):
                     violations.append(f"ungrounded amount: {m.group(0).strip()}")
                 continue
             # Police amounts that LOOK like money: a $ sign, a scale word, a
@@ -181,6 +189,7 @@ class GroundingVerifier:
                 has_dollar or bool(scale)
                 or (magnitude >= Decimal(1000) and money_formatted)
                 or magnitude >= _BARE_MONEY_FLOOR
+                or _trailing_currency(prose, m.end())
             )
             if not looks_like_money:
                 continue
