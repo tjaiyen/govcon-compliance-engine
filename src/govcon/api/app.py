@@ -120,6 +120,26 @@ class NarrativeRequest(BaseModel):
     )
 
 
+def _advisory_notice() -> str:
+    """The per-response advisory line — honest about the LIVE data mode (synthetic
+    by default; real, local-model when GOVCON_DATA_MODE=real)."""
+    from govcon.ai.gate import is_real
+
+    over = "real data (local model)" if is_real() else "synthetic data"
+    return (
+        f"Advisory rendering over {over}. The structured determination above is "
+        "the authoritative result."
+    )
+
+
+def _narrative_banner() -> str:
+    """The draft-narrative banner — mode-aware, always advisory/not-for-filing."""
+    from govcon.ai.gate import is_real
+
+    kind = "REAL DATA (LOCAL MODEL)" if is_real() else "SYNTHETIC DATA"
+    return f"{kind} — DRAFT NARRATIVE FOR INTERNAL REVIEW, NOT FOR FILING OR CERTIFICATION"
+
+
 def _sse(evt: dict) -> str:
     """Pack one event as an SSE ``data:`` frame (single unnamed event channel)."""
     return "data: " + json.dumps(evt) + "\n\n"
@@ -160,8 +180,8 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
     app = FastAPI(
         title="GovCon Compliance Workbench",
         description=(
-            "Advisory decision-support & training tool on SYNTHETIC data. "
-            "Not a certified accounting system; see /api/about."
+            "Advisory decision-support & training tool. Not a certified accounting "
+            "system; see /api/about for the current data mode and limitations."
         ),
         version="0.1.0",
     )
@@ -282,10 +302,7 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 "violations": result.grounding.violations,
             },
             "cost": result.cost.as_dict(),
-            "notice": (
-                "Advisory rendering over synthetic data. The structured "
-                "determination above is the authoritative result."
-            ),
+            "notice": _advisory_notice(),
         }
 
     def _serve_ai(request: Request, run, *, envelope=None, extra: dict | None = None) -> dict:
@@ -537,12 +554,7 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 workspace=request.headers.get("x-govcon-workspace") or "default",
                 max_usd=max_usd,
             ),
-            extra={
-                "synthetic_banner": (
-                    "SYNTHETIC DATA — DRAFT NARRATIVE FOR INTERNAL REVIEW, NOT FOR "
-                    "FILING OR CERTIFICATION"
-                )
-            },
+            extra={"synthetic_banner": _narrative_banner()},
         )
 
     # ---------------------------------------------------------------- the UI
