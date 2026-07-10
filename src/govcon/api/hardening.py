@@ -26,11 +26,16 @@ _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
-    # The workbench is fully self-contained (fonts inlined, no CDN); a strict
-    # CSP is therefore safe and blocks any injected external resource.
+    # The workbench is ONE self-contained, same-origin page: its JS and CSS are
+    # inline and its fonts are data: URIs, with NO external resources. So a CSP
+    # that blocks every external origin (default-src 'self') while allowing the
+    # page's own inline script/style is both strict and correct — 'unsafe-inline'
+    # here does not re-open the injected-data XSS surface (that is handled by
+    # esc()/safeUrl in the page; CSP is defense-in-depth against EXTERNAL script).
     "Content-Security-Policy": (
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-        "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
     ),
 }
 
