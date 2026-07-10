@@ -28,24 +28,45 @@ Hard-graded stress-test fixes (this pass):
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
 from govcon.ai.dispatch import GroundingLedger
+
+#: Fold non-ASCII digits to ASCII before matching so a hallucinated amount can't
+#: hide behind fullwidth (５０), Arabic-Indic (٥٠), or Persian numerals. NFKC
+#: handles fullwidth; the table covers the Arabic-Indic + Persian ranges.
+_NONASCII_DIGITS = {0x0660 + i: str(i) for i in range(10)}
+_NONASCII_DIGITS.update({0x06F0 + i: str(i) for i in range(10)})
+
+
+def _fold_digits(prose: str) -> str:
+    return unicodedata.normalize("NFKC", prose).translate(_NONASCII_DIGITS)
 
 # $12,000,000 | $12,000,000.00 | $12M | $12 million | 12000000.00
 _MONEY = re.compile(
     r"\$?\s?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(million|billion|thousand|m|bn|k)?\b",
     re.IGNORECASE,
 )
-#: A currency unit word immediately AFTER a bare number ("50000 dollars") makes
-#: it a money claim regardless of size/formatting — closing the bare-integer
-#: hole below the _BARE_MONEY_FLOOR. Years/counts have no such unit word.
+#: A currency marker adjacent to a bare number makes it a money claim regardless
+#: of size/formatting — closing the sub-_BARE_MONEY_FLOOR hole. A unit word AFTER
+#: ("50000 dollars") OR a currency marker BEFORE ("USD 50000", "£40000", "€40000")
+#: both count; years/counts have neither.
 _CURRENCY_WORD = re.compile(r"\s*(?:dollars?|usd)\b", re.IGNORECASE)
+_LEADING_CUR = re.compile(r"(?:USD|US\$|\$|£|€)\s*$", re.IGNORECASE)
 
 
 def _trailing_currency(prose: str, end: int) -> bool:
     return bool(_CURRENCY_WORD.match(prose[end:end + 12]))
+
+
+def _leading_currency(prose: str, start: int) -> bool:
+    return bool(_LEADING_CUR.search(prose[max(0, start - 8):start]))
+
+
+def _adjacent_currency(prose: str, m: re.Match) -> bool:
+    return _trailing_currency(prose, m.end()) or _leading_currency(prose, m.start())
 _SCALE = {
     "thousand": Decimal(1_000), "k": Decimal(1_000),
     "million": Decimal(1_000_000), "m": Decimal(1_000_000),
@@ -164,6 +185,7 @@ def _norm_cite(s: str) -> str:
 class GroundingVerifier:
     def verify(self, prose: str, ledger: GroundingLedger) -> GroundingResult:
         violations: list[str] = []
+        prose = _fold_digits(prose)  # non-ASCII digits can't hide from the matcher
         ledger_nums = _ledger_numeric(ledger)
         ledger_cites = {_norm_cite(c) for c in ledger.citations}
 
@@ -176,7 +198,7 @@ class GroundingVerifier:
                 # the ledger, so flag it whenever it looks money-sized — a $/
                 # scale word, or 6+ integer digits (≥ _BARE_MONEY_FLOOR).
                 int_digits = len(number.split(".")[0].replace(",", "").lstrip("0"))
-                if has_dollar or scale or int_digits >= 6 or _trailing_currency(prose, m.end()):
+                if has_dollar or scale or int_digits >= 6 or _adjacent_currency(prose, m):
                     violations.append(f"ungrounded amount: {m.group(0).strip()}")
                 continue
             # Police amounts that LOOK like money: a $ sign, a scale word, a
@@ -189,7 +211,7 @@ class GroundingVerifier:
                 has_dollar or bool(scale)
                 or (magnitude >= Decimal(1000) and money_formatted)
                 or magnitude >= _BARE_MONEY_FLOOR
-                or _trailing_currency(prose, m.end())
+                or _adjacent_currency(prose, m)
             )
             if not looks_like_money:
                 continue

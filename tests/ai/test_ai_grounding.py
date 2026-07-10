@@ -54,6 +54,31 @@ def test_bare_amount_with_currency_word_passes_when_grounded():
     assert r.verified, r.violations
 
 
+def test_leading_currency_marker_is_policed():
+    # the symmetric twin: a currency marker BEFORE a sub-floor bare integer
+    # ("USD 50000", "£40000", "€40000") is a money claim, must be flagged.
+    lg = _ledger(values={"7500000.00"})
+    for prose in ("The SAT floor is USD 50000.", "It is £40000.", "about €4200",
+                  "US$ 9999 applies"):
+        r = GroundingVerifier().verify(prose, lg)
+        assert not r.verified, f"should flag: {prose!r}"
+
+
+def test_leading_currency_passes_when_grounded():
+    lg = _ledger(values={"50000.00"})
+    assert GroundingVerifier().verify("The floor is USD 50000.", lg).verified
+
+
+def test_nonascii_digits_are_not_invisible():
+    # fullwidth / Arabic-Indic numerals must be folded before matching so a
+    # hallucinated amount cannot hide from the verifier.
+    lg = _ledger(values={"7500000.00"})
+    for prose in ("The trigger is ５００００００ dollars.",   # fullwidth
+                  "The cap is ٥٠٠٠٠٠٠٠ dollars."):        # Arabic-Indic
+        r = GroundingVerifier().verify(prose, lg)
+        assert not r.verified, f"should flag: {prose!r}"
+
+
 def test_ungrounded_citation_is_flagged():
     lg = _ledger(citations=["FAR 15.403-4"])
     r = GroundingVerifier().verify("This is governed by 48 CFR 9903.201-2.", lg)

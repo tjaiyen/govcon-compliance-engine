@@ -175,6 +175,31 @@ def test_response_notice_reflects_real_mode(session_factory, monkeypatch):
     assert "synthetic" not in body["notice"].lower()
 
 
+def test_system_prompts_reflect_live_data_mode(monkeypatch):
+    # stress-test finding: ask/draft-rule/draft-narrative prompts were frozen at
+    # module import → could tell the model the WRONG data mode. Now per-call.
+    from govcon.ai.prompts import system_for
+
+    monkeypatch.setenv("GOVCON_DATA_MODE", "real")
+    for pattern in ("ask", "tutor", "draft_rule", "draft_narrative"):
+        sys = system_for(pattern)
+        assert "REAL-DATA MODE" in sys, pattern
+        assert "SYNTHETIC DATA ONLY" not in sys, pattern
+    monkeypatch.setenv("GOVCON_DATA_MODE", "synthetic")
+    assert "SYNTHETIC DATA ONLY" in system_for("ask")
+    assert "REAL-DATA MODE" not in system_for("draft_narrative")
+
+
+def test_draft_rule_notice_reflects_real_mode(session_factory, monkeypatch):
+    # the draft-rule notice hardcoded "Synthetic data." — missed by the earlier fix
+    monkeypatch.setenv("GOVCON_DATA_MODE", "real")
+    fake = _LocalFake([final_turn("draft only; requires a human migration")])
+    c = TestClient(create_app(session_factory=session_factory, llm_client=fake))
+    body = c.post("/api/draft-rule", json={"instruction": "..."}).json()
+    assert "Real data (local model)." in body["notice"]
+    assert "Synthetic data" not in body["notice"]
+
+
 def test_narrative_banner_reflects_real_mode(session_factory, monkeypatch):
     monkeypatch.setenv("GOVCON_DATA_MODE", "real")
     fake = _LocalFake([

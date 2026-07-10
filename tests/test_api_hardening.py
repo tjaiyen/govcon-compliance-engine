@@ -87,3 +87,17 @@ def test_sqlite_runs_in_wal_mode(engine):
     with engine.connect() as conn:
         mode = conn.execute(sa.text("PRAGMA journal_mode")).scalar()
     assert str(mode).lower() == "wal"
+
+
+def test_rate_limiter_memory_is_bounded():
+    # stress-test finding: rotated IPs must not grow _hits without bound
+    from govcon.api.hardening import RateLimiter
+
+    rl = RateLimiter(limit=5, window_s=60)
+    rl._MAX_KEYS = 100  # small cap for the test
+    for i in range(1000):
+        rl.allow(f"ip-{i}")
+    assert len(rl._hits) <= 100  # LRU-capped, not 1000
+    # a normal repeated caller is still limited correctly
+    rl2 = RateLimiter(limit=3, window_s=60)
+    assert [rl2.allow("x") for _ in range(5)] == [True, True, True, False, False]
