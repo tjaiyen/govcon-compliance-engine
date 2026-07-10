@@ -44,10 +44,14 @@ def test_bearer_gate_off_by_default(session_factory):
 def test_bearer_gate_enforced_when_set(session_factory, monkeypatch):
     monkeypatch.setenv("GOVCON_API_TOKEN", "s3cret")
     c = _c(session_factory)
-    assert c.get("/api/about").status_code == 401
-    assert c.get("/api/about", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+    # a gated /api/* route requires the shared secret
+    assert c.get("/api/reverify").status_code == 401
+    assert c.get("/api/reverify", headers={"Authorization": "Bearer s3cret"}).status_code == 200
     # the UI (non-/api) stays open so the page can bootstrap
     assert c.get("/").status_code == 200
+    # /api/about is a deliberate public carve-out: the transparency/limitations
+    # text is always readable, gate or no gate.
+    assert c.get("/api/about").status_code == 200
 
 
 def test_cors_allow_list_when_configured(session_factory, monkeypatch):

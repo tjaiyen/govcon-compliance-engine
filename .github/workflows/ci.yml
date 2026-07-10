@@ -23,8 +23,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync dependencies
-        run: uv sync
+      - name: Sync dependencies (with auth extra for the JWT test matrix)
+        run: uv sync --extra auth
 
       - name: Lint (ruff)
         run: uv run ruff check src/ tests/ scripts/
@@ -65,8 +65,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync dependencies (with postgres extra)
-        run: uv sync --extra postgres
+      - name: Sync dependencies (with postgres + auth extras)
+        run: uv sync --extra postgres --extra auth
 
       - name: Migrations apply cleanly on Postgres (incl. 0017 triggers)
         run: uv run alembic upgrade head

@@ -10,6 +10,7 @@ open; it is explicitly NOT an identity provider (per-user auth is Phase 5).
 
 from __future__ import annotations
 
+import hmac
 import os
 import threading
 import time
@@ -19,6 +20,7 @@ from collections import defaultdict, deque
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from govcon.core.identity import reset_actor, set_actor
 from govcon.core.logging import get_logger
 
 #: Response headers applied to every response — safe defaults, no external deps.
@@ -70,9 +72,38 @@ def _client_key(request: Request) -> str:
     return client.host if client else "unknown"
 
 
-def install(app: FastAPI) -> None:
-    """Wire request-id + security headers + optional bearer gate + optional
-    CORS. Rate limiting is applied per-endpoint via ``rate_limit_ask``."""
+#: /api/* paths that stay OPEN even when auth is on — a probe and the honesty
+#: statement should always be readable (the whole point of a limitations page).
+_PUBLIC_API_PATHS = frozenset({"/api/about"})
+
+
+def _bearer_token(request: Request) -> str | None:
+    """Extract a single well-formed ``Bearer <token>``. A missing, duplicated
+    (Starlette comma-joins duplicate headers → >2 parts), or non-Bearer header
+    yields ``None`` → 401."""
+    parts = request.headers.get("authorization", "").split()
+    if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+        return parts[1]
+    return None
+
+
+def _refuse(request_id: str, status: int, error: str) -> JSONResponse:
+    return JSONResponse(
+        {"error": error}, status_code=status,
+        headers={"X-Request-Id": request_id, **_SECURITY_HEADERS},
+    )
+
+
+def install(app: FastAPI, verifier=None) -> None:
+    """Wire request-id + security headers + auth gate + optional CORS. Rate
+    limiting is applied per-endpoint via the ask limiter.
+
+    ``verifier`` (a ``TokenVerifier`` from ``govcon.api.auth``) enables real
+    per-user JWT auth. When set, it is the authority for every gated ``/api/*``
+    path and SUPERSEDES the coarse ``GOVCON_API_TOKEN`` shared-secret gate: a
+    valid token sets the audit actor to a verified ``auth:<sub>``. When ``None``
+    (the default), behavior is unchanged — the optional shared-secret gate, if
+    ``GOVCON_API_TOKEN`` is set, still applies."""
     api_token = os.environ.get("GOVCON_API_TOKEN")  # None → gate off (dev)
     cors_origins = [
         o.strip() for o in os.environ.get("GOVCON_CORS_ORIGINS", "").split(",") if o.strip()
@@ -91,18 +122,49 @@ def install(app: FastAPI) -> None:
     @app.middleware("http")
     async def _harden(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
-        # Optional shared-secret gate for /api/* (NOT an IdP — a deploy switch).
-        if api_token and request.url.path.startswith("/api/"):
-            supplied = request.headers.get("authorization", "")
-            if supplied != f"Bearer {api_token}":
+        path = request.url.path
+        gated = path.startswith("/api/") and path not in _PUBLIC_API_PATHS
+        actor_token = None
+        if gated and verifier is not None:
+            # Real JWT auth: cryptographically verified identity is the sole
+            # authority (the X-Govcon-User header is ignored — see app.py).
+            from govcon.api.auth import AuthError
+
+            token = _bearer_token(request)
+            if token is None:
+                return _refuse(request_id, 401, "unauthorized")
+            try:
+                identity = verifier.verify(token)
+            except AuthError as exc:
                 get_logger("govcon.api").warning(
-                    "auth_rejected", request_id=request_id, path=request.url.path
+                    "auth_rejected", request_id=request_id, path=path, reason=str(exc)
                 )
-                return JSONResponse(
-                    {"error": "unauthorized"}, status_code=401,
-                    headers={"X-Request-Id": request_id, **_SECURITY_HEADERS},
+                return _refuse(request_id, 401, "unauthorized")
+            # Scope gate on the expensive AI route only (authenticated-but-
+            # forbidden): read-only determinations stay usable to any valid user.
+            if (
+                verifier.required_scope
+                and path == "/api/ask"
+                and verifier.required_scope not in identity.scopes
+            ):
+                get_logger("govcon.api").warning(
+                    "auth_forbidden", request_id=request_id, path=path
                 )
-        response = await call_next(request)
+                return _refuse(request_id, 403, "forbidden")
+            actor_token = set_actor(identity.actor)
+        elif gated and api_token:
+            # Coarse shared-secret gate (NOT an IdP). Constant-time compare.
+            supplied = request.headers.get("authorization", "")
+            if not hmac.compare_digest(supplied, f"Bearer {api_token}"):
+                get_logger("govcon.api").warning(
+                    "auth_rejected", request_id=request_id, path=path
+                )
+                return _refuse(request_id, 401, "unauthorized")
+        try:
+            response = await call_next(request)
+        finally:
+            if actor_token is not None:
+                reset_actor(actor_token)
         response.headers["X-Request-Id"] = request_id
         for k, v in _SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)

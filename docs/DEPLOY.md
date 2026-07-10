@@ -32,8 +32,30 @@ govcon serve --host 127.0.0.1 --port 8000     # add --workspaces for routing
 | `GOVCON_AI_MODEL` | `claude-opus-4-8` | Model for the assistant. |
 | `GOVCON_AI_MAX_USD` | `0.50` | Hard per-request USD ceiling for `/api/ask`. |
 | `GOVCON_AI_RATE_LIMIT` / `_WINDOW_S` | `30` / `60` | `/api/ask` requests per window per client IP → 429. |
-| `GOVCON_API_TOKEN` | — | When set, every `/api/*` request must send `Authorization: Bearer <token>`. A shared-secret gate, **NOT an identity provider** — per-user auth is Phase 5. |
+| `GOVCON_API_TOKEN` | — | Coarse shared-secret edge gate: when set (and JWT auth is off), every `/api/*` request must send `Authorization: Bearer <token>` (constant-time compared). **NOT an identity provider.** Superseded by JWT auth when that is configured. |
 | `GOVCON_CORS_ORIGINS` | — | Comma-separated allow-list; empty = same-origin only. |
+
+### Real per-user authentication (optional; needs the `auth` extra — `uv sync --extra auth`)
+
+Off by default: with none of these set the audit-trail actor is *asserted* from
+the `X-Govcon-User` header. Set **exactly one** signing source to turn on real
+JWT bearer auth — every gated `/api/*` call then requires a valid token and the
+audit actor becomes a verified `auth:<sub>` (the header is ignored). `/health`,
+`/`, and `/api/about` stay public. **Auth ≠ real-data:** this does not touch
+`GOVCON_DATA_MODE` — the tool stays advisory on synthetic data.
+
+| Var | Default | Effect |
+|---|---|---|
+| `GOVCON_JWT_SECRET` | — | Symmetric HS256 shared secret (one signing source). |
+| `GOVCON_JWT_PUBLIC_KEY` | — | Static asymmetric PEM public key (RS*/ES*). |
+| `GOVCON_JWT_JWKS_URL` | — | IdP JWKS endpoint (`https://` only); keys cached, fail-closed. |
+| `GOVCON_JWT_ISSUER` / `GOVCON_JWT_AUDIENCE` | — | **Required** when auth is on; `iss`/`aud` validated on every token. |
+| `GOVCON_JWT_ALGS` | per key type | Override accepted algs; must stay within the key's family (algorithm-confusion guard). |
+| `GOVCON_JWT_LEEWAY_S` | `60` | Clock-skew tolerance for `exp`/`nbf`/`iat`. |
+| `GOVCON_JWT_REQUIRED_SCOPE` / `GOVCON_JWT_SCOPE_CLAIM` | — / `scope` | If set, a token missing the scope gets `403` on `/api/ask` (the expensive route); read-only determinations stay open to any valid user. |
+
+Setting more than one signing source, or omitting `iss`/`aud`, makes the app
+refuse to boot — a misconfiguration fails loud, never silently open.
 
 ## TLS / reverse proxy
 

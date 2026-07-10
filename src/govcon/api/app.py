@@ -110,10 +110,15 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         ),
         version="0.1.0",
     )
+    from govcon.api.auth import build_verifier
     from govcon.api.hardening import install as install_hardening
     from govcon.api.hardening import make_ask_limiter
 
-    install_hardening(app)  # request-id + security headers + optional gate/CORS
+    # Real per-user JWT auth (None = off, the default: identity stays asserted
+    # from the header). When on, the hardening layer verifies every gated
+    # /api/* request and sets a cryptographically-verified auth:<sub> actor.
+    verifier = build_verifier()
+    install_hardening(app, verifier=verifier)  # request-id + headers + auth/CORS
     ask_limiter = make_ask_limiter()
 
     @app.get("/health")
@@ -139,10 +144,14 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
     @app.middleware("http")
     async def _attribute_request(request: Request, call_next):
-        # Asserted identity (stated limitation): a header names the actor;
-        # authentication is a deployment concern in front of this app. The
-        # value is sanitized + length-capped before it reaches the immutable
-        # audit trail (it is untrusted input).
+        if verifier is not None:
+            # Auth is ON: the cryptographically-verified actor is set by the
+            # hardening layer (deeper middleware). The spoofable X-Govcon-User
+            # header is STRUCTURALLY IGNORED here — defer entirely.
+            return await call_next(request)
+        # Auth is OFF (default): asserted identity (stated limitation) — a header
+        # names the actor; the value is sanitized + length-capped before it
+        # reaches the immutable audit trail (it is untrusted input).
         user = sanitize_actor_label(request.headers.get("x-govcon-user"))
         token = set_actor(f"web:{user}" if user else "web:anonymous")
         try:
