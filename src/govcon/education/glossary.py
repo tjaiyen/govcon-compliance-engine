@@ -238,4 +238,59 @@ GLOSSARY: list[dict] = [
             "and the proposed-rule CAS figures as [watch] items."
         ),
     ),
+    dict(
+        term="price analysis vs. cost analysis (FAR 15.404-1)",
+        plain=(
+            "Two ways to decide a proposed price is fair and reasonable: price "
+            "analysis compares the whole price to the market; cost analysis "
+            "breaks down and evaluates each individual cost element."
+        ),
+        why=(
+            "Which one you owe drives the entire proposal, negotiation, and "
+            "audit workflow — and it is not a free choice."
+        ),
+        example=(
+            "When certified cost or pricing data are required (TINA applies, no "
+            "exception), cost analysis is required; otherwise price analysis is "
+            "the basis. The engine's /api/pricing-analysis returns which, cited."
+        ),
+    ),
+    dict(
+        term="subcontractor certified cost or pricing data (FAR 15.404-3)",
+        plain=(
+            "When a prime contractor must make its subcontractor furnish "
+            "certified cost or pricing data — because a large enough sub price "
+            "flows straight into the prime's price."
+        ),
+        why=(
+            "The prime is responsible for the reasonableness of subcontract "
+            "prices; missing this flowdown is a classic defective-pricing "
+            "exposure at the prime level."
+        ),
+        example=(
+            "Required when the subcontract price is both more than the dated "
+            "certified-data threshold and more than 10 percent of the prime's "
+            "proposed price, or $20 million or more."
+        ),
+    ),
+    dict(
+        term="weighted guidelines profit objective (FAR 15.404-4 / DFARS 215.404-71)",
+        plain=(
+            "The DoD structured method (the DD-1547 form) for building a target "
+            "profit before negotiation — risk factors expressed as percentages "
+            "of cost, each assigned within a set designated range."
+        ),
+        why=(
+            "Profit is always negotiated, but the government starts from this "
+            "structured objective; knowing the factor ranges is how you argue "
+            "your number."
+        ),
+        example=(
+            "Performance-risk factors (technical, management) run 3 to 7 percent "
+            "of cost; contract-type risk runs from about 4 to 6 percent for "
+            "firm-fixed-price down to 0 to 1 percent for cost-plus-fixed-fee. The "
+            "engine's /api/weighted-guidelines computes the objective and flags "
+            "any factor outside its range."
+        ),
+    ),
 ]

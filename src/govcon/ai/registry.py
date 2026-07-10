@@ -170,6 +170,37 @@ def _run_subcontract_data(session: Session, inp: dict) -> dict:
     }
 
 
+def _run_weighted_guidelines(session: Session, inp: dict) -> dict:
+    from govcon.services.pricing_analysis import compute_weighted_guidelines_profit
+
+    try:
+        d = compute_weighted_guidelines_profit(
+            cost_base=_money(inp["cost_base"]),
+            contract_type=inp["contract_type"],
+            technical_pct=Decimal(str(inp["technical_pct"])),
+            management_pct=Decimal(str(inp["management_pct"])),
+            contract_type_risk_pct=Decimal(str(inp["contract_type_risk_pct"])),
+            technology_incentive=bool(inp.get("technology_incentive", False)),
+            facilities_capital_profit=_money(inp.get("facilities_capital_profit", "0")),
+        )
+    except (ValueError, InvalidOperation) as exc:
+        return {"available": False, "message": str(exc)}
+    return {
+        "available": True,
+        "cost_base": str(d.cost_base),
+        "contract_type": d.contract_type,
+        "performance_risk_profit": str(d.performance_risk_profit),
+        "contract_type_risk_profit": str(d.contract_type_risk_profit),
+        "facilities_capital_profit": str(d.facilities_capital_profit),
+        "total_profit_objective": str(d.total_profit_objective),
+        "profit_rate_pct": str(d.profit_rate_pct),
+        "factor_findings": d.factor_findings,
+        "reasons": d.reasons,
+        "caveats": d.caveats,
+        "source_citation": d.source_citation,
+    }
+
+
 def _run_threshold(session: Session, inp: dict) -> dict:
     try:
         row = threshold_in_force(session, inp["rule"], _date(inp["on"]))
@@ -356,6 +387,32 @@ TOOLS: dict[str, ToolSpec] = {
             run=_run_subcontract_data,
         ),
         ToolSpec(
+            name="compute_weighted_guidelines_profit",
+            description=(
+                "FAR 15.404-4 / DFARS 215.404-71: compute the DoD weighted-guidelines profit "
+                "OBJECTIVE (DD-1547) from a cost base, contract type, and assigned risk factor "
+                "percentages, validating each factor against its DFARS designated range. "
+                "contract_type is one of ffp_no_financing, ffp_performance_based_payments, "
+                "ffp_progress_payments, ffp_level_of_effort, fpi_no_financing, "
+                "fpi_performance_based_payments, fpi_progress_payments, cpif, cpff, "
+                "time_and_materials, labor_hour. Percentages are numbers like 5 (=5%)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "cost_base": {"type": "string", "description": "Total cost excl. FCCM (Block 20), USD decimal string"},
+                    "contract_type": {"type": "string"},
+                    "technical_pct": {"type": "string"},
+                    "management_pct": {"type": "string"},
+                    "contract_type_risk_pct": {"type": "string"},
+                    "technology_incentive": {"type": "boolean"},
+                    "facilities_capital_profit": {"type": "string"},
+                },
+                "required": ["cost_base", "contract_type", "technical_pct", "management_pct", "contract_type_risk_pct"],
+            },
+            run=_run_weighted_guidelines,
+        ),
+        ToolSpec(
             name="threshold_in_force",
             description=(
                 "Look up the dated regulatory threshold in force for a rule on a date, with its "
@@ -446,6 +503,7 @@ ASK_TOOLS = [
     "determine_tina_applicability",
     "determine_price_or_cost_analysis",
     "determine_subcontract_certified_data",
+    "compute_weighted_guidelines_profit",
     "threshold_in_force",
     "run_self_check",
     "reverification_items",

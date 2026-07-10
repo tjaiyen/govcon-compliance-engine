@@ -179,3 +179,128 @@ def determine_subcontract_certified_data(
         reasons=reasons,
         caveats=caveats,
     )
+
+
+# --------------------------------- FAR 15.404-4 / DFARS 215.404-71: weighted guidelines
+# The DoD structured profit/fee objective (DD Form 1547). Factor ranges are
+# grounded verbatim to DFARS 215.404-71-2 (performance risk) and -71-3 (contract
+# type risk); percentages apply to Block 20 = total contract cost EXCLUDING
+# facilities capital cost of money. Facilities-capital profit (215.404-71-4) uses
+# its own DD-1861 cost-of-money factors and is accepted here as a provided input,
+# not computed — stated as an explicit limitation.
+
+_PERF_RANGE = (Decimal("3"), Decimal("7"))            # technical + management/cost-control
+_TECH_INCENTIVE_RANGE = (Decimal("7"), Decimal("11"))  # technical factor, innovation
+_PERF_NORMAL = Decimal("5")
+
+#: Contract-type risk: (low, high, normal) designated ranges, DFARS 215.404-71-3.
+_CTR_RANGES: dict[str, tuple[Decimal, Decimal, Decimal]] = {
+    "ffp_no_financing": (Decimal("4"), Decimal("6"), Decimal("5.0")),
+    "ffp_performance_based_payments": (Decimal("2.5"), Decimal("5.5"), Decimal("4.0")),
+    "ffp_progress_payments": (Decimal("2"), Decimal("4"), Decimal("3.0")),
+    "ffp_level_of_effort": (Decimal("0"), Decimal("1"), Decimal("0.5")),
+    "fpi_no_financing": (Decimal("2"), Decimal("4"), Decimal("3.0")),
+    "fpi_performance_based_payments": (Decimal("0.5"), Decimal("3.5"), Decimal("2.0")),
+    "fpi_progress_payments": (Decimal("0"), Decimal("2"), Decimal("1.0")),
+    "cpif": (Decimal("0"), Decimal("2"), Decimal("1.0")),
+    "cpff": (Decimal("0"), Decimal("1"), Decimal("0.5")),
+    "time_and_materials": (Decimal("0"), Decimal("1"), Decimal("0.5")),
+    "labor_hour": (Decimal("0"), Decimal("1"), Decimal("0.5")),
+}
+
+CONTRACT_TYPES = tuple(_CTR_RANGES)
+
+
+@dataclass
+class WeightedGuidelinesProfit:
+    cost_base: Decimal  # DD-1547 Block 20 (total cost excluding FCCM)
+    contract_type: str
+    performance_risk_profit: Decimal
+    contract_type_risk_profit: Decimal
+    facilities_capital_profit: Decimal
+    total_profit_objective: Decimal
+    profit_rate_pct: Decimal
+    factor_findings: list[dict] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    source_citation: str = "DFARS 215.404-71 (FAR 15.404-4)"
+
+
+def _finding(name: str, value: Decimal, low: Decimal, high: Decimal) -> dict:
+    return {
+        "factor": name,
+        "value_pct": str(value),
+        "designated_range": f"{low}% to {high}%",
+        "in_range": low <= value <= high,
+    }
+
+
+def compute_weighted_guidelines_profit(
+    *,
+    cost_base: Decimal,
+    contract_type: str,
+    technical_pct: Decimal,
+    management_pct: Decimal,
+    contract_type_risk_pct: Decimal,
+    technology_incentive: bool = False,
+    facilities_capital_profit: Decimal = Decimal(0),
+) -> WeightedGuidelinesProfit:
+    """DFARS 215.404-71 weighted-guidelines profit objective. Each assigned factor
+    is validated against its DFARS designated range (flagged, never silently
+    clamped); the objective sums performance-risk + contract-type-risk (each a %
+    of the cost base) + the provided facilities-capital profit. Pure — no dated
+    lookups; the ranges are structural DFARS constants."""
+    if contract_type not in _CTR_RANGES:
+        raise ValueError(
+            f"unknown contract_type {contract_type!r}; expected one of "
+            f"{', '.join(_CTR_RANGES)}"
+        )
+    ctr_low, ctr_high, _ctr_normal = _CTR_RANGES[contract_type]
+    tech_low, tech_high = _TECH_INCENTIVE_RANGE if technology_incentive else _PERF_RANGE
+
+    findings = [
+        _finding("technical risk", technical_pct, tech_low, tech_high),
+        _finding("management/cost-control risk", management_pct, *_PERF_RANGE),
+        _finding(f"contract-type risk ({contract_type})", contract_type_risk_pct, ctr_low, ctr_high),
+    ]
+
+    hundred = Decimal(100)
+    cents = Decimal("0.01")
+    perf_profit = ((technical_pct + management_pct) / hundred * cost_base).quantize(cents)
+    ctr_profit = (contract_type_risk_pct / hundred * cost_base).quantize(cents)
+    facilities_capital_profit = facilities_capital_profit.quantize(cents)
+    total = perf_profit + ctr_profit + facilities_capital_profit
+    rate = (total / cost_base * hundred).quantize(cents) if cost_base else Decimal("0.00")
+
+    reasons = [
+        f"Performance-risk profit = (technical {technical_pct}% + management "
+        f"{management_pct}%) × ${cost_base:,} (Block 20) = ${perf_profit:,} "
+        "(DFARS 215.404-71-2).",
+        f"Contract-type-risk profit = {contract_type_risk_pct}% × ${cost_base:,} = "
+        f"${ctr_profit:,} for a {contract_type} contract (DFARS 215.404-71-3).",
+        f"Total profit objective ${total:,} = {rate}% of the ${cost_base:,} cost base.",
+    ]
+    caveats = [
+        "Each factor must be assigned WITHIN its DFARS designated range; a value "
+        "outside the range is flagged for justification (DFARS 215.404-71-2/-3).",
+        "Facilities-capital profit (DFARS 215.404-71-4) uses its own DD-1861 "
+        "cost-of-money factors and is taken here as a provided input, NOT computed.",
+        "This is the objective going into negotiation, not the negotiated profit; "
+        "profit is always a negotiated outcome (FAR 15.404-4(a), (b)).",
+    ]
+    out_of_range = [f["factor"] for f in findings if not f["in_range"]]
+    if out_of_range:
+        caveats.insert(0, f"Assigned factor(s) OUTSIDE the DFARS designated range: {', '.join(out_of_range)} — require documented justification.")
+
+    return WeightedGuidelinesProfit(
+        cost_base=cost_base,
+        contract_type=contract_type,
+        performance_risk_profit=perf_profit,
+        contract_type_risk_profit=ctr_profit,
+        facilities_capital_profit=facilities_capital_profit,
+        total_profit_objective=total,
+        profit_rate_pct=rate,
+        factor_findings=findings,
+        reasons=reasons,
+        caveats=caveats,
+    )
