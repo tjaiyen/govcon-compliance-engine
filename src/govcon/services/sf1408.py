@@ -193,9 +193,11 @@ SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE
 Known limitations this tool states about itself (handoff spec §4, verified
 regulatory reference §4):
 
-1. SEGREGATION OF DUTIES: this is a single-user tool. It can model and
-   document SoD concepts, but cannot itself provide segregation of duties —
-   one person controls every role, including the audit trail's session id.
+1. SEGREGATION OF DUTIES: every audited change is attributed to a named
+   actor (per request/operation, Phase 4), but that identity is ASSERTED —
+   a header, an environment variable, an OS login — not authenticated.
+   Attribution is not segregation of duties: without a real identity
+   provider in front of a deployment, one person can still claim any role.
 2. DESIGN vs. OPERATION: SF 1408 is a DESIGN review. Passing this tool's
    self-check demonstrates the design criteria are understood and modeled;
    it says nothing about adequacy in extended operation (the post-award

@@ -21,19 +21,16 @@ import enum
 import hashlib
 import json
 from decimal import Decimal
-from uuid import uuid4
 
 import sqlalchemy as sa
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from govcon.core.identity import current_actor
 from govcon.models import AuditTrail
 
 GENESIS_HASH = "0" * 64
 AUDIT_EXEMPT = {"audit_trail"}
-
-#: Single-user tool — a per-process session identifier is sufficient (§0.1).
-SESSION_ID = uuid4().hex
 
 
 def _canon_default(value):
@@ -120,6 +117,7 @@ def write_audit_rows(session: Session, _ctx) -> None:
         sa.select(AuditTrail.entry_hash).order_by(AuditTrail.trail_id.desc()).limit(1)
     ).scalar()
     prev = prev or GENESIS_HASH
+    actor = current_actor()  # resolved once per flush — one flush, one actor
     for table, record_id, action, old, new in changes:
         timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
@@ -128,7 +126,7 @@ def write_audit_rows(session: Session, _ctx) -> None:
             "action": action,
             "old_values": old,
             "new_values": new,
-            "user_id": SESSION_ID,
+            "user_id": actor,
             "timestamp": timestamp,
             "previous_entry_hash": prev,
         }
@@ -140,7 +138,7 @@ def write_audit_rows(session: Session, _ctx) -> None:
                 action=action,
                 old_values=None if old is None else canonical_json(old),
                 new_values=None if new is None else canonical_json(new),
-                user_id=SESSION_ID,
+                user_id=actor,
                 timestamp=timestamp,
                 previous_entry_hash=prev,
                 entry_hash=entry_hash,
