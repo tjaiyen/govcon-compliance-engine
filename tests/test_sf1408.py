@@ -28,12 +28,23 @@ def test_clean_state_passes_all_six(session):
     ]
 
 
-def _bypass_checks(session, ddl: str) -> None:
-    """Simulate out-of-band corruption: constraints bypassed via PRAGMA
-    (exactly the scenario the self-check exists to catch)."""
-    session.execute(sa.text("PRAGMA ignore_check_constraints = ON"))
-    session.execute(sa.text(ddl))
-    session.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
+def _bypass_checks(session, ddl: str, *, pg_drop_constraints=()) -> None:
+    """Simulate out-of-band corruption to seed a structurally-invalid row the
+    self-check must catch. On SQLite the CHECK constraints are suspended via
+    PRAGMA; on Postgres (which has no session-level PRAGMA) the specific named
+    constraint is dropped — the test database is per-test disposable, so this
+    is contained. Runs the criterion DETECTION SQL on BOTH backends (a
+    Postgres-only bug in that SQL would otherwise hide behind a green suite)."""
+    if session.get_bind().dialect.name == "postgresql":
+        for constraint in pg_drop_constraints:
+            session.execute(
+                sa.text(f"ALTER TABLE gl_accounts DROP CONSTRAINT IF EXISTS {constraint}")
+            )
+        session.execute(sa.text(ddl))
+    else:
+        session.execute(sa.text("PRAGMA ignore_check_constraints = ON"))
+        session.execute(sa.text(ddl))
+        session.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
 
 
 def test_criterion_a_fails_on_poolless_indirect_account(session):
@@ -43,6 +54,7 @@ def test_criterion_a_fails_on_poolless_indirect_account(session):
         session,
         "INSERT INTO gl_accounts (account_code, account_name, cost_type) "
         "VALUES ('6666', 'Orphan Indirect', 'indirect')",
+        pg_drop_constraints=["ck_gl_accounts_indirect_requires_pool"],
     )
     r = _results_by_criterion(session)["A"]
     assert not r.passed and "6666" in r.findings[0]
@@ -51,7 +63,10 @@ def test_criterion_a_fails_on_poolless_indirect_account(session):
 def test_criterion_b_fails_on_direct_txn_without_contract(session):
     data = seed_all(session)
     session.commit()
-    session.execute(sa.text("DROP TRIGGER trg_gl_transactions_direct_needs_contract"))
+    drop = ("DROP TRIGGER trg_gl_transactions_direct_needs_contract ON gl_transactions"
+            if session.get_bind().dialect.name == "postgresql"
+            else "DROP TRIGGER trg_gl_transactions_direct_needs_contract")
+    session.execute(sa.text(drop))
     session.execute(
         sa.text(
             "INSERT INTO gl_transactions (account_id, amount, transaction_date, period_id) "
@@ -80,6 +95,7 @@ def test_criterion_d_fails_on_unallowable_with_pool_or_missing_citation(session)
         session,
         f"INSERT INTO gl_accounts (account_code, account_name, cost_type, pool_assignment) "
         f"VALUES ('7999', 'Bad Unallowable', 'unallowable', {data.pool.pool_id})",
+        pg_drop_constraints=["ck_gl_accounts_pool_only_if_indirect"],
     )
     r = _results_by_criterion(session)["D"]
     assert not r.passed

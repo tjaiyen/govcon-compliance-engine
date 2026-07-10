@@ -29,6 +29,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from govcon.models import (
@@ -61,6 +62,10 @@ DECISION_RULE_TERMS: dict[str, str] = {
 _FR_API = "https://www.federalregister.gov/api/v1/documents.json"
 _PER_PAGE = 20
 _EXCERPT_CHARS = 600
+#: Hard cap on the fetched body (a page of 20 docs is a few tens of KB; 8 MB is
+#: generous). Bounds memory even if a hijacked/redirected endpoint streams a
+#: huge body — the 20s timeout only bounds stall time, not size.
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 def default_fetcher(term: str, since: datetime.date) -> dict:
@@ -78,7 +83,14 @@ def default_fetcher(term: str, since: datetime.date) -> dict:
         params.append(("fields[]", f))
     url = _FR_API + "?" + urllib.parse.urlencode(params)
     with urllib.request.urlopen(url, timeout=20) as resp:  # noqa: S310 - fixed https host
-        return json.load(resp)
+        # Read one byte past the cap so we can tell "exactly at cap" from
+        # "over cap" and fail loudly rather than silently truncating JSON.
+        raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+    if len(raw) > _MAX_RESPONSE_BYTES:
+        raise ValueError(
+            f"Federal Register response exceeded {_MAX_RESPONSE_BYTES} bytes — refusing"
+        )
+    return json.loads(raw)
 
 
 @dataclass
@@ -91,6 +103,7 @@ class ScanResult:
     skipped_unmapped: list[str] = field(default_factory=list)
     unavailable: list[dict] = field(default_factory=list)  # {watch_rule, error}
     truncated: list[dict] = field(default_factory=list)  # {watch_rule, total, recorded}
+    malformed: list[dict] = field(default_factory=list)  # {watch_rule, doc} — no document_number
 
 
 def watch_targets(session: Session) -> tuple[list[dict], list[str]]:
@@ -177,30 +190,56 @@ def scan(
                 {"watch_rule": watch_rule, "total": total, "recorded": len(docs)}
             )
         for doc in docs:
-            key = ("federal_register", doc["document_number"], watch_rule)
-            if key in known:
-                result.already_known += 1
-                continue
-            known.add(key)
-            excerpt = (doc.get("abstract") or "")[:_EXCERPT_CHARS] or None
-            row = RegulatorySuggestion(
-                watch_rule=watch_rule,
-                source="federal_register",
-                document_number=doc["document_number"],
-                doc_type=doc.get("type"),
-                title=doc.get("title") or "(untitled)",
-                publication_date=_date(doc.get("publication_date")),
-                effective_on=_date(doc.get("effective_on")),
-                url=doc.get("html_url"),
-                excerpt=excerpt,
-                strong_match=_strong(term, doc),
-                fetched_at=now,
-                status=SuggestionStatus.NEW,
-            )
-            session.add(row)
-            session.flush()
-            result.new_suggestions.append(row.suggestion_id)
+            # Fetched data is untrusted (B13): a malformed document (missing
+            # id, un-parseable date, wrong types) is skipped-with-report, never
+            # a crash that aborts the whole scan and loses prior suggestions.
+            try:
+                _record_doc(session, result, known, watch_rule, term, doc, now)
+            except (KeyError, ValueError, TypeError) as exc:
+                result.malformed.append(
+                    {"watch_rule": watch_rule,
+                     "document_number": doc.get("document_number"),
+                     "error": str(exc)}
+                )
     return result
+
+
+def _record_doc(session, result, known, watch_rule, term, doc, now) -> None:
+    doc_number = doc.get("document_number")
+    if not doc_number:
+        raise ValueError("document has no document_number")
+    key = ("federal_register", doc_number, watch_rule)
+    if key in known:
+        result.already_known += 1
+        return
+    excerpt = (doc.get("abstract") or "")[:_EXCERPT_CHARS] or None
+    row = RegulatorySuggestion(
+        watch_rule=watch_rule,
+        source="federal_register",
+        document_number=doc_number,
+        doc_type=doc.get("type"),
+        title=doc.get("title") or "(untitled)",
+        publication_date=_date(doc.get("publication_date")),
+        effective_on=_date(doc.get("effective_on")),
+        url=doc.get("html_url"),
+        excerpt=excerpt,
+        strong_match=_strong(term, doc),
+        fetched_at=now,
+        status=SuggestionStatus.NEW,
+    )
+    session.add(row)
+    # A concurrent/retried scan may race the (source, document, watch_rule)
+    # unique constraint; absorb it as "already known" via a savepoint rather
+    # than poisoning the whole transaction.
+    try:
+        with session.begin_nested():
+            session.flush()
+    except IntegrityError:
+        known.add(key)
+        result.already_known += 1
+        return
+    known.add(key)
+    result.new_suggestions.append(row.suggestion_id)
 
 
 def review_suggestion(

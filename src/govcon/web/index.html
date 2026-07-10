@@ -208,7 +208,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
-  function esc(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+  // href sink for EXTERNAL (fetched) URLs: attribute-escaping alone can't stop
+  // a javascript:/data: scheme, so allow only http(s) and fall back to "#".
+  function safeUrl(u) { return /^https?:\/\//i.test(String(u == null ? "" : u)) ? esc(u) : "#"; }
   function post(url, body) { return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }); }
   function get(url) { return fetch(url).then(function (r) { return r.json(); }); }
   function slug(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
@@ -440,7 +443,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     host.innerHTML = b.suggestions.map(function (sg) {
       var mark = sg.strong_match ? '<span class="tag warn">strong</span>' : '<span class="tag info">weak</span>';
       var eff = sg.effective_on ? " &middot; effective " + esc(sg.effective_on) : "";
-      var link = sg.url ? ' <a href="' + esc(sg.url) + '" target="_blank" rel="noopener">read &#8599;</a>' : "";
+      var link = sg.url ? ' <a href="' + safeUrl(sg.url) + '" target="_blank" rel="noopener">read &#8599;</a>' : "";
       return '<div class="watch-item">' + mark + ' <span class="kind">[' + esc(sg.status) + "]</span> " +
         esc(sg.watch_rule) + " &mdash; " + esc(sg.doc_type || "Document") + " " + esc(sg.document_number) +
         " (" + esc(sg.publication_date || "n.d.") + ")" + eff + "<br>" + esc(sg.title) + link + "</div>";

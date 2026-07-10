@@ -27,6 +27,15 @@ down_revision: Union[str, Sequence[str], None] = "0011"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+
+def _money_type():
+    """The seed insert must bind with the same dialect split SafeNumeric uses:
+    canonical TEXT on SQLite (byte-identical to the original migration
+    behavior), native NUMERIC on Postgres."""
+    from govcon.db.types import Money
+
+    return Money()
+
 SEED = [
     ("EXEC_COMP_CAP", "646000.00", "2024-01-01", "2025-01-01",
      "BBA §702 cap, costs incurred CY2024: OMB/OFPP Contractor Compensation "
@@ -44,7 +53,7 @@ def upgrade() -> None:
     thresholds = sa.table(
         "regulatory_thresholds",
         sa.column("rule_name", sa.String),
-        sa.column("value", sa.Text),
+        sa.column("value", _money_type()),  # TEXT on SQLite / NUMERIC on PG (SafeNumeric)
         sa.column("effective_date", sa.Date),
         sa.column("superseded_date", sa.Date),
         sa.column("status", sa.String),

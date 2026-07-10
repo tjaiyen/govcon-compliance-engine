@@ -10,6 +10,8 @@ completely untouched by the browsing/what-if UI.
 from __future__ import annotations
 
 import datetime
+import threading
+from collections import OrderedDict
 from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -19,7 +21,12 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from govcon.core.identity import current_actor, reset_actor, set_actor
+from govcon.core.identity import (
+    current_actor,
+    reset_actor,
+    sanitize_actor_label,
+    set_actor,
+)
 from govcon.db.engine import make_engine, make_session_factory
 from govcon.models import Contract, ContractAction
 from govcon.models.enums import (
@@ -86,14 +93,21 @@ def create_app(session_factory=None, workspace_registry=None) -> FastAPI:
         ),
         version="0.1.0",
     )
-    workspace_factories: dict[str, object] = {}
+    # Bounded engine cache (one connection pool per workspace); an LRU cap +
+    # lock stop unbounded pool growth and a check-then-build race across the
+    # sync-endpoint threadpool.
+    workspace_factories: OrderedDict[str, object] = OrderedDict()
+    workspace_lock = threading.Lock()
+    _MAX_CACHED_WORKSPACES = 32
 
     @app.middleware("http")
     async def _attribute_request(request: Request, call_next):
         # Asserted identity (stated limitation): a header names the actor;
-        # authentication is a deployment concern in front of this app.
-        user = request.headers.get("x-govcon-user")
-        token = set_actor(f"web:{user}" if user and user.strip() else "web:anonymous")
+        # authentication is a deployment concern in front of this app. The
+        # value is sanitized + length-capped before it reaches the immutable
+        # audit trail (it is untrusted input).
+        user = sanitize_actor_label(request.headers.get("x-govcon-user"))
+        token = set_actor(f"web:{user}" if user else "web:anonymous")
         try:
             return await call_next(request)
         finally:
@@ -103,7 +117,11 @@ def create_app(session_factory=None, workspace_registry=None) -> FastAPI:
         name = request.headers.get("x-govcon-workspace")
         if not name or workspace_registry is None:
             return factory
-        if name not in workspace_factories:
+        with workspace_lock:
+            cached = workspace_factories.get(name)
+            if cached is not None:
+                workspace_factories.move_to_end(name)
+                return cached
             try:
                 if not workspace_registry.exists(name):
                     raise HTTPException(
@@ -113,10 +131,12 @@ def create_app(session_factory=None, workspace_registry=None) -> FastAPI:
                     )
             except ValueError as exc:  # hostile/invalid name — never a path
                 raise HTTPException(status_code=422, detail=str(exc)) from None
-            workspace_factories[name] = make_session_factory(
-                make_engine(workspace_registry.url(name))
-            )
-        return workspace_factories[name]
+            built = make_session_factory(make_engine(workspace_registry.url(name)))
+            workspace_factories[name] = built
+            if len(workspace_factories) > _MAX_CACHED_WORKSPACES:
+                _, evicted = workspace_factories.popitem(last=False)
+                evicted.kw["bind"].dispose()  # close the evicted pool
+            return built
 
     def get_session(request: Request) -> Iterator[Session]:
         with _factory_for(request)() as session:
@@ -124,18 +144,26 @@ def create_app(session_factory=None, workspace_registry=None) -> FastAPI:
 
     @app.get("/api/whoami")
     def whoami(request: Request) -> dict:
-        """Who the engine will attribute this request's actions to, and
-        which isolated workspace it is routed at."""
+        """Who the engine will attribute this request's actions to, and which
+        isolated workspace it is routed at. Deliberately does NOT enumerate
+        other workspaces — that would leak tenant identities across the very
+        isolation boundary this feature enforces (enumeration is CLI-only,
+        `govcon workspace list`, gated by local shell access)."""
+        requested = request.headers.get("x-govcon-workspace")
+        if workspace_registry is None:
+            workspace = "default"
+        elif requested:
+            # only confirm the caller's OWN workspace, never list the rest
+            try:
+                workspace = requested if workspace_registry.exists(requested) else "unknown"
+            except ValueError:
+                workspace = "invalid"
+        else:
+            workspace = "default"
         return {
             "actor": current_actor(),
-            "workspace": (
-                request.headers.get("x-govcon-workspace") or "default"
-                if workspace_registry is not None
-                else "default"
-            ),
-            "workspaces": (
-                workspace_registry.list() if workspace_registry is not None else None
-            ),
+            "workspace": workspace,
+            "routing_enabled": workspace_registry is not None,
         }
 
     # ---------------------------------------------------------------- the UI

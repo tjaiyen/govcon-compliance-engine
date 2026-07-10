@@ -24,10 +24,29 @@ import contextlib
 import contextvars
 import getpass
 import os
+import re
 from uuid import uuid4
 
 #: Last-resort attribution when nothing identifies the caller.
 PROCESS_FALLBACK = f"proc:{uuid4().hex[:12]}"
+
+#: Max length of an externally-asserted actor label (it lands verbatim in the
+#: append-only, hash-chained audit trail — cap it so a header cannot bloat
+#: immutable rows).
+MAX_ACTOR_LEN = 64
+_ACTOR_UNSAFE = re.compile(r"[^A-Za-z0-9._@-]")
+
+
+def sanitize_actor_label(raw: str | None) -> str | None:
+    """Reduce an untrusted actor label (e.g. an X-Govcon-User header) to a
+    safe, bounded token: control chars / whitespace / delimiters collapsed to
+    '_', capped to MAX_ACTOR_LEN. Returns None for empty/whitespace so the
+    caller can fall back to an anonymous marker. Prevents forgeable
+    'admin web:root'-style strings and unbounded audit-row growth."""
+    if raw is None:
+        return None
+    cleaned = _ACTOR_UNSAFE.sub("_", raw.strip())[:MAX_ACTOR_LEN]
+    return cleaned or None
 
 _actor: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "govcon_actor", default=None

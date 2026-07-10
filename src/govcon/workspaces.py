@@ -32,6 +32,15 @@ import sys
 from pathlib import Path
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+#: Windows reserved device names — a workspace name becomes a filename, and on
+#: Windows `nul.db` / `con.db` open the null device or fail opaquely (silent
+#: data loss). Rejected case-insensitively even though this is a POSIX-first
+#: tool, so a workspace created here is portable.
+_RESERVED_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
+)
 
 
 def govcon_home() -> Path:
@@ -51,6 +60,10 @@ class WorkspaceRegistry:
             raise ValueError(
                 f"invalid workspace name {name!r} — lowercase letters, digits, "
                 "hyphen/underscore, max 40 chars, must start alphanumeric"
+            )
+        if name.lower() in _RESERVED_NAMES:
+            raise ValueError(
+                f"invalid workspace name {name!r} — reserved device name"
             )
         return name
 
