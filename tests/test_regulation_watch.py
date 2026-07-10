@@ -199,7 +199,7 @@ def test_suggestions_are_never_deleted(session):
 def test_suggestions_api_and_ui_block(session_factory):
     c = TestClient(create_app(session_factory=session_factory))
     body = c.get("/api/suggestions").json()
-    assert body == {"suggestions": []}  # nothing until a scan runs
+    assert body["suggestions"] == [] and body["truncated"] is False  # nothing until a scan runs
     html = c.get("/").text
     assert 'id="r-suggest"' in html and "/api/suggestions" in html
     assert "never automatic" in html

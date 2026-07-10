@@ -50,11 +50,20 @@ class ToolSpec:
         }
 
 
+#: A dollar amount above this is not a real contract value — reject it rather
+#: than let NaN/Infinity/1e400 into the engine (breaks comparisons, bloats the
+#: audit/grounding ledger, and can raise from Decimal.quantize downstream).
+_MAX_MONEY = Decimal("1e15")
+
+
 def _money(raw) -> Decimal:
     try:
-        return Decimal(str(raw))
+        value = Decimal(str(raw))
     except (InvalidOperation, TypeError) as exc:
         raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
+    if not value.is_finite() or abs(value) > _MAX_MONEY:
+        raise ValueError(f"dollar amount out of range: {raw!r}")
+    return value
 
 
 def _date(raw) -> datetime.date:

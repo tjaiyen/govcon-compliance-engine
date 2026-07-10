@@ -185,3 +185,15 @@ def test_index_has_personas_scenarios_glossary_and_tristate(session_factory):
     assert 'id="e-apc"' in html and "checkbox" not in html.split('id="e-apc"')[1][:200]
     # still self-contained
     assert "fonts.googleapis" not in html
+
+
+def test_index_has_ask_ui_and_a11y_landmarks(session_factory):
+    """PR-3: the /api/ask endpoint now has a UI; a11y landmarks are present."""
+    html = client(session_factory).get("/").text
+    # the Ask card is wired to /api/ask
+    assert 'id="f-ask"' in html and 'id="r-ask"' in html and "/api/ask" in html
+    # a11y: skip link, main landmark, non-color status glyph, print styles,
+    # locale-robust money parse
+    assert 'class="skip"' in html and '<main id="main"' in html
+    assert ".tag.ok::before" in html and "@media print" in html
+    assert "function parseMoney" in html

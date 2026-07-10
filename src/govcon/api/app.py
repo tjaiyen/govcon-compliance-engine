@@ -10,6 +10,7 @@ completely untouched by the browsing/what-if UI.
 from __future__ import annotations
 
 import datetime
+import os
 import threading
 from collections import OrderedDict
 from collections.abc import Iterator
@@ -68,11 +69,19 @@ class TINARequest(BaseModel):
     tina_exception_waiver_granted: bool | None = None
 
 
+#: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
+#: raise from Decimal.quantize downstream) — shared bound with the AI registry.
+_MAX_MONEY = Decimal("1e15")
+
+
 def _money(raw: str) -> Decimal:
     try:
-        return Decimal(raw)
+        value = Decimal(raw)
     except (InvalidOperation, TypeError) as exc:  # pragma: no cover - guard
         raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
+    if not value.is_finite() or abs(value) > _MAX_MONEY:
+        raise ValueError(f"dollar amount out of range: {raw!r}")
+    return value
 
 
 class AskRequest(BaseModel):
@@ -101,6 +110,31 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         ),
         version="0.1.0",
     )
+    from govcon.api.auth import build_verifier
+    from govcon.api.hardening import install as install_hardening
+    from govcon.api.hardening import make_ask_limiter
+
+    # Real per-user JWT auth (None = off, the default: identity stays asserted
+    # from the header). When on, the hardening layer verifies every gated
+    # /api/* request and sets a cryptographically-verified auth:<sub> actor.
+    verifier = build_verifier()
+    install_hardening(app, verifier=verifier)  # request-id + headers + auth/CORS
+    ask_limiter = make_ask_limiter()
+
+    @app.get("/health")
+    def health() -> dict:
+        """Liveness + a cheap DB readiness probe."""
+        import sqlalchemy as sa
+
+        try:
+            with factory() as s:
+                s.execute(sa.text("SELECT 1"))
+            db_ok = True
+        except Exception:  # pragma: no cover - only on a broken DB
+            db_ok = False
+        return {"status": "ok" if db_ok else "degraded", "db": db_ok,
+                "ai": llm_client is not None}
+
     # Bounded engine cache (one connection pool per workspace); an LRU cap +
     # lock stop unbounded pool growth and a check-then-build race across the
     # sync-endpoint threadpool.
@@ -110,10 +144,14 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
     @app.middleware("http")
     async def _attribute_request(request: Request, call_next):
-        # Asserted identity (stated limitation): a header names the actor;
-        # authentication is a deployment concern in front of this app. The
-        # value is sanitized + length-capped before it reaches the immutable
-        # audit trail (it is untrusted input).
+        if verifier is not None:
+            # Auth is ON: the cryptographically-verified actor is set by the
+            # hardening layer (deeper middleware). The spoofable X-Govcon-User
+            # header is STRUCTURALLY IGNORED here — defer entirely.
+            return await call_next(request)
+        # Auth is OFF (default): asserted identity (stated limitation) — a header
+        # names the actor; the value is sanitized + length-capped before it
+        # reaches the immutable audit trail (it is untrusted input).
         user = sanitize_actor_label(request.headers.get("x-govcon-user"))
         token = set_actor(f"web:{user}" if user else "web:anonymous")
         try:
@@ -185,14 +223,27 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         makes the determination; unverified prose is withheld."""
         if llm_client is None:
             return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from fastapi import HTTPException as _HTTPException
+
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
         from govcon.ai.gate import assert_synthetic
         from govcon.ai.patterns import ask as run_ask
+        from govcon.api.hardening import _client_key
+
+        if not ask_limiter.allow(_client_key(request)):
+            raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
 
         try:
             assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
         except SyntheticGateError as exc:
             return {"ai_available": False, "reason": str(exc)}
+        # Hard per-request USD ceiling so a single /api/ask cannot drive
+        # unbounded Claude spend (GOVCON_AI_MAX_USD, default $0.50). Combined
+        # with the rate limiter below, this bounds AI cost-DoS.
+        try:
+            max_usd = Decimal(os.environ.get("GOVCON_AI_MAX_USD", "0.50"))
+        except (InvalidOperation, TypeError):
+            max_usd = Decimal("0.50")
         try:
             result = run_ask(
                 llm_client,
@@ -200,9 +251,10 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 req.question,
                 actor=current_actor(),
                 workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
             )
         except CostCeilingError as exc:
-            return {"ai_available": True, "error": str(exc)}
+            return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
         return {
             "ai_available": True,
             "prose": result.prose,
@@ -220,23 +272,33 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
     # ---------------------------------------------------------------- the UI
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return (_WEB_DIR / "index.html").read_text(encoding="utf-8")
+    def index() -> HTMLResponse:
+        html = (_WEB_DIR / "index.html").read_text(encoding="utf-8")
+        # Explicit charset + a short revalidating cache: the 140KB file (mostly
+        # inlined fonts) is cacheable, but must-revalidate so a redeploy of the
+        # UI code is picked up promptly rather than served stale forever.
+        return HTMLResponse(
+            html,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Cache-Control": "max-age=300, must-revalidate",
+            },
+        )
 
     # ------------------------------------------------------------ determinations
     @app.post("/api/cas")
     def cas(req: CASRequest, session: Session = Depends(get_session)) -> dict:
-        contract = Contract(
-            award_date=req.award_date,
-            contract_value=_money(req.contract_value),
-            contractor_size=req.contractor_size,
-            is_nontraditional_dc=req.is_nontraditional_dc,
-            agency_type=req.agency_type,
-            cas_coverage_type=CASCoverageType.NONE,
-        )
         try:
+            contract = Contract(
+                award_date=req.award_date,
+                contract_value=_money(req.contract_value),
+                contractor_size=req.contractor_size,
+                is_nontraditional_dc=req.is_nontraditional_dc,
+                agency_type=req.agency_type,
+                cas_coverage_type=CASCoverageType.NONE,
+            )
             d = determine_cas_coverage(session, contract)
-        except LookupError as exc:
+        except (ValueError, LookupError) as exc:
             return {"available": False, "message": str(exc)}
         return {
             "available": True,
@@ -250,22 +312,22 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
     @app.post("/api/tina")
     def tina(req: TINARequest, session: Session = Depends(get_session)) -> dict:
-        action = ContractAction(
-            action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
-            action_date=req.action_date,
-            proposed_value=_money(req.proposed_value),
-            tina_exception_adequate_price_competition=(
-                req.tina_exception_adequate_price_competition
-            ),
-            tina_exception_commercial_product_service=(
-                req.tina_exception_commercial_product_service
-            ),
-            tina_exception_prices_set_by_law=req.tina_exception_prices_set_by_law,
-            tina_exception_waiver_granted=req.tina_exception_waiver_granted,
-        )
         try:
+            action = ContractAction(
+                action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
+                action_date=req.action_date,
+                proposed_value=_money(req.proposed_value),
+                tina_exception_adequate_price_competition=(
+                    req.tina_exception_adequate_price_competition
+                ),
+                tina_exception_commercial_product_service=(
+                    req.tina_exception_commercial_product_service
+                ),
+                tina_exception_prices_set_by_law=req.tina_exception_prices_set_by_law,
+                tina_exception_waiver_granted=req.tina_exception_waiver_granted,
+            )
             d = determine_tina_applicability(session, action)
-        except LookupError as exc:
+        except (ValueError, LookupError) as exc:
             return {"available": False, "message": str(exc)}
         return {
             "available": True,
@@ -326,25 +388,37 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             ],
         }
 
+    _SUGGESTIONS_CAP = 500
+
     @app.get("/api/suggestions")
-    def suggestions(session: Session = Depends(get_session)) -> dict:
+    def suggestions(
+        session: Session = Depends(get_session), limit: int = _SUGGESTIONS_CAP
+    ) -> dict:
         """Regulation-watch inbox, read-only. Scanning (network + writes) and
-        reviewing stay CLI-only on purpose — the workbench never mutates."""
+        reviewing stay CLI-only on purpose — the workbench never mutates.
+        Hard-capped so the response can never blow up memory; ``truncated``
+        flags when the cap hit."""
         import sqlalchemy as sa
 
         from govcon.models import RegulatorySuggestion
 
+        capped = max(1, min(limit, _SUGGESTIONS_CAP))
         rows = (
             session.execute(
-                sa.select(RegulatorySuggestion).order_by(
+                sa.select(RegulatorySuggestion)
+                .order_by(
                     RegulatorySuggestion.strong_match.desc(),
                     RegulatorySuggestion.publication_date.desc(),
                 )
+                .limit(capped + 1)
             )
             .scalars()
             .all()
         )
+        truncated = len(rows) > capped
+        rows = rows[:capped]
         return {
+            "truncated": truncated,
             "suggestions": [
                 {
                     "suggestion_id": r.suggestion_id,

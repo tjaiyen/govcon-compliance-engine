@@ -25,9 +25,16 @@ def make_engine(url: str | None = None) -> Engine:
     if engine.dialect.name == "sqlite":
 
         @event.listens_for(engine, "connect")
-        def _enable_sqlite_fks(dbapi_conn, _record):  # pragma: no cover - trivial
+        def _sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - trivial
             cursor = dbapi_conn.cursor()
+            # FKs: load-bearing referential integrity (off by default on SQLite).
             cursor.execute("PRAGMA foreign_keys=ON")
+            # WAL: the audit chain's read-last-hash/insert relies on serialized
+            # writes; WAL gives multi-reader/single-writer with far less
+            # blocking than the default rollback journal. (No effect on an
+            # in-memory DB, which WAL does not support — guarded by dialect.)
+            if not url or ":memory:" not in (url or ""):
+                cursor.execute("PRAGMA journal_mode=WAL")
             cursor.close()
 
     return engine

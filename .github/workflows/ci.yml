@@ -23,8 +23,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync dependencies
-        run: uv sync
+      - name: Sync dependencies (with auth extra for the JWT test matrix)
+        run: uv sync --extra auth
 
       - name: Lint (ruff)
         run: uv run ruff check src/ tests/ scripts/
@@ -65,8 +65,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync dependencies (with postgres extra)
-        run: uv sync --extra postgres
+      - name: Sync dependencies (with postgres + auth extras)
+        run: uv sync --extra postgres --extra auth
 
       - name: Migrations apply cleanly on Postgres (incl. 0017 triggers)
         run: uv run alembic upgrade head
@@ -77,3 +77,27 @@ jobs:
         run: uv run pytest -q
         env:
           GOVCON_TEST_PG: postgresql+psycopg://govcon:govcon@127.0.0.1:5432/postgres
+
+  # Frontend browser tests (Playwright) — the persona/ask/form flows the
+  # server-side tests can't see. Own job so the core suite stays browser-free.
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: "3.12"
+
+      - name: Sync dependencies (ai + frontend extras)
+        run: uv sync --extra ai --extra frontend
+
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: uv run pytest tests/frontend -q
+        env:
+          GOVCON_DATA_MODE: synthetic

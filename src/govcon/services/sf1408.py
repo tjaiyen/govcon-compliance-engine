@@ -187,17 +187,38 @@ def run_self_check(session: Session) -> list[CriterionResult]:
     return [check(session) for check in CHECKS]
 
 
-LIMITATIONS = """\
+_LIMITATIONS_HEADER = """\
 SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE
 
 Known limitations this tool states about itself (handoff spec §4, verified
 regulatory reference §4):
 
+"""
+
+#: Item 1 has two forms — the audit-trail identity is either asserted (the
+#: localhost default) or cryptographically authenticated (JWT auth configured).
+#: Either way the tool stays advisory on synthetic data: an authenticated actor
+#: is a prerequisite for segregation of duties, not SoD itself and not a
+#: certification. explain_limitations() picks the accurate one at call time.
+_LIMITATION_1_ASSERTED = """\
 1. SEGREGATION OF DUTIES: every audited change is attributed to a named
    actor (per request/operation, Phase 4), but that identity is ASSERTED —
    a header, an environment variable, an OS login — not authenticated.
    Attribution is not segregation of duties: without a real identity
    provider in front of a deployment, one person can still claim any role.
+"""
+
+_LIMITATION_1_AUTHENTICATED = """\
+1. SEGREGATION OF DUTIES: real per-user JWT auth is configured, so every
+   audited change is attributed to a cryptographically AUTHENTICATED actor
+   (a verified token subject; the X-Govcon-User header is ignored). That is
+   a prerequisite for segregation of duties — but attribution is still not
+   SoD by itself (role separation is a deployment/IdP policy), and even
+   authenticated the tool remains ADVISORY on synthetic data: not a
+   certification and not a DCAA system-adequacy test.
+"""
+
+_LIMITATIONS_REST = """\
 2. DESIGN vs. OPERATION: SF 1408 is a DESIGN review. Passing this tool's
    self-check demonstrates the design criteria are understood and modeled;
    it says nothing about adequacy in extended operation (the post-award
@@ -229,4 +250,13 @@ regulatory reference §4):
 
 
 def explain_limitations() -> str:
-    return LIMITATIONS
+    """The tool's self-stated limitations. Item 1 reflects the live identity
+    posture: ASSERTED by default, AUTHENTICATED when real JWT auth is
+    configured — auth and real-data are separate switches, so the synthetic /
+    advisory posture holds either way."""
+    from govcon.api.auth import auth_is_configured
+
+    item_1 = (
+        _LIMITATION_1_AUTHENTICATED if auth_is_configured() else _LIMITATION_1_ASSERTED
+    )
+    return _LIMITATIONS_HEADER + item_1 + _LIMITATIONS_REST

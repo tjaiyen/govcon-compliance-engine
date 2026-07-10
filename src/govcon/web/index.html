@@ -87,15 +87,36 @@ details.gloss summary::before { content: '+ '; color: var(--accent); font-family
 details.gloss[open] summary::before { content: '- '; }
 details.gloss .g-body { padding: 0 0 14px; font-size: 0.88rem; color: #bcd0e0; }
 .hint { font-size: 0.82rem; color: #96abbc; margin-top: 10px; }
+.skip { position: absolute; left: -999px; top: 0; background: var(--accent); color: #0a1f33; padding: 8px 14px; z-index: 100; border-radius: 0 0 4px 0; }
+.skip:focus { left: 0; }
+/* non-color status cue for colorblind users (tags also carry a glyph) */
+.tag.ok::before { content: "\2713\00a0"; } .tag.warn::before { content: "\26a0\00a0"; } .tag.stop::before { content: "\2715\00a0"; } .tag.info::before { content: "\2139\00a0"; }
+.result:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* Ask card */
+#ask-q { width: 100%; min-height: 64px; background: #0d2236; border: 1px solid rgba(159,184,205,0.34); border-radius: 4px; color: #eaf2f9; font-family: inherit; font-size: 0.92rem; padding: 10px 12px; resize: vertical; }
+.ask-badge { font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 3px; border: 1px solid; }
+.ask-badge.grounded { color: #46d39a; border-color: rgba(70,211,154,0.5); } .ask-badge.withheld { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.ask-prose { font-size: 0.95rem; color: #eaf2f9; line-height: 1.6; margin: 10px 0; }
+.ask-cost { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: #96abbc; }
+button:disabled { opacity: 0.5; cursor: progress; }
+@media print {
+  :root { color-scheme: light; }
+  body { background: #fff; color: #111; }
+  .banner, .persona-bar, #sec-learn, form, .skip, button, #ask-card, footer a { display: none !important; }
+  .card { border: 1px solid #ccc; break-inside: avoid; background: #fff; color: #111; }
+  .caveat { border-left: 2px solid #999; } .mono { color: #111; }
+  details.teach, details.gloss { display: block !important; } details[open] .body, .g-body { display: block !important; }
+}
 footer { margin-top: 40px; border-top: 1px solid rgba(159,184,205,0.16); padding-top: 20px; color: #96abbc; font-size: 0.82rem; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to the workbench</a>
 <div class="banner"><div class="wrap"><b>Synthetic data</b><span>Advisory decision-support &amp; training tool — <strong>not</strong> a certified accounting system. <a href="/api/about" target="_blank" rel="noopener">Read the limitations &#8599;</a></span></div></div>
 
-<div class="wrap">
+<main id="main" class="wrap">
   <header class="top">
     <p class="eyebrow">GovCon Cost-Accounting · Compliance Workbench</p>
     <h1>Ask a compliance question. Get the answer — <span style="color:var(--accent)">and why.</span></h1>
@@ -112,6 +133,19 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <button type="button" id="p-auditor" aria-pressed="false">Auditor</button>
   </div>
   <p class="p-desc" id="p-desc" aria-live="polite"></p>
+
+  <!-- ============ AI assistant (Ask) ============ -->
+  <section class="card" id="ask-card">
+    <p class="eyebrow-sm">Flow 00 &middot; Ask in plain English</p>
+    <h2>Ask the engine a compliance question</h2>
+    <p class="sub">The assistant calls the same deterministic engine as a tool and explains the result &mdash; it never decides. The authoritative determination is always shown beneath the answer. Synthetic data only.</p>
+    <form id="f-ask">
+      <label for="ask-q">Your question</label>
+      <textarea id="ask-q" maxlength="2000" placeholder="e.g. Does CAS apply to a $12M award made on 2026-05-15 to an other-than-small contractor?"></textarea>
+      <button type="submit">Ask</button>
+    </form>
+    <div class="result" id="r-ask" tabindex="-1" aria-live="polite" hidden></div>
+  </section>
 
   <!-- ============ scenario library (Phase 2) ============ -->
   <section class="card" id="sec-learn">
@@ -202,7 +236,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     Plain-English reference: <a href="https://tjaiyen.github.io/govcon-compliance-engine/#sec-glossary" target="_blank" rel="noopener">the glossary &#8599;</a>.
     Every term here is defined there. This workbench operates on synthetic data only and is not a substitute for professional audit or legal judgment.
   </footer>
-</div>
+</main>
 
 <script>
 (function () {
@@ -215,6 +249,19 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   function post(url, body) { return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }); }
   function get(url) { return fetch(url).then(function (r) { return r.json(); }); }
   function slug(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
+  // Locale-robust money parse: handles US "12,000,000.50" AND EU "12.000.000,50".
+  function parseMoney(raw) {
+    var t = String(raw == null ? "" : raw).replace(/[^\d.,-]/g, "");
+    var lastDot = t.lastIndexOf("."), lastComma = t.lastIndexOf(",");
+    if (lastDot >= 0 && lastComma >= 0) {
+      var dec = lastDot > lastComma ? "." : ","; var tho = dec === "." ? "," : ".";
+      t = t.split(tho).join("").replace(dec, ".");
+    } else if (lastComma >= 0) {
+      var parts = t.split(",");
+      t = (parts.length === 2 && parts[1].length <= 2) ? parts[0] + "." + parts[1] : parts.join("");
+    }
+    return t;
+  }
 
   // ---- personas: same data, different depth ----
   var PERSONAS = {
@@ -254,7 +301,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   function provBlock(p) {
     if (!P().prov || !p) return "";
     return '<div class="prov">decision table ' + esc(p.decision_table) + " v" + esc(p.version) +
-      " &middot; rules fired: " + p.fired_rules.map(esc).join(" &rarr; ") + "</div>";
+      " &middot; rules fired: " + (p.fired_rules || []).map(esc).join(" &rarr; ") + "</div>";
   }
   function teach(reasons, caveats, prov) {
     var mode = P().teach;
@@ -304,16 +351,17 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   }
   $("f-contract").addEventListener("submit", function (e) {
     e.preventDefault();
+    var btn = e.target.querySelector('[type="submit"]'); if (btn) btn.disabled = true;
     var casBody = {
       award_date: $("c-date").value,
-      contract_value: $("c-value").value.replace(/[$,\s]/g, ""),
+      contract_value: parseMoney($("c-value").value),
       contractor_size: $("c-size").value,
       is_nontraditional_dc: $("c-nontrad").checked,
       agency_type: $("c-agency").value,
     };
     var tinaBody = {
       action_date: $("c-date").value,
-      proposed_value: $("c-value").value.replace(/[$,\s]/g, ""),
+      proposed_value: parseMoney($("c-value").value),
       tina_exception_adequate_price_competition: tri("e-apc"),
       tina_exception_commercial_product_service: tri("e-com"),
       tina_exception_prices_set_by_law: tri("e-law"),
@@ -323,7 +371,48 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     Promise.all([post("/api/cas", casBody), post("/api/tina", tinaBody)]).then(function (res) {
       lastContract = { cas: res[0], tina: res[1] };
       renderContract();
-    }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine.</p>'; });
+      host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+    }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine. Please try again.</p>'; })
+      .then(function () { if (btn) btn.disabled = false; });
+  });
+
+  // ---- flow 00: AI assistant (Ask) ----
+  function renderDetermination(d) {
+    if (!d || !d.result) return "";
+    if (d.tool === "determine_cas_coverage") return renderMini("cas", d.result);
+    if (d.tool === "determine_tina_applicability") return renderMini("tina", d.result);
+    // other tools: a compact, escaped key/value line
+    var r = d.result;
+    var val = r.value != null ? "$" + esc(r.value) : (r.status ? esc(r.status) : "");
+    return '<div class="watch-item"><span class="kind">[' + esc(d.tool) + "]</span> " + val + "</div>";
+  }
+  $("f-ask").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var q = ($("ask-q").value || "").trim();
+    var host = $("r-ask"); var btn = e.target.querySelector('[type="submit"]');
+    if (!q) { host.hidden = false; host.innerHTML = '<p class="muted">Type a question first.</p>'; return; }
+    if (btn) btn.disabled = true;
+    host.hidden = false; host.innerHTML = '<p class="muted">Asking the engine…</p>';
+    post("/api/ask", { question: q }).then(function (b) {
+      if (b.ai_available === false) {
+        host.innerHTML = '<p class="muted">The assistant is not enabled on this server' + (b.reason ? " (" + esc(b.reason) + ")" : "") + ".</p>";
+        return;
+      }
+      if (b.cost_exceeded) { host.innerHTML = '<p class="muted">That question hit the cost ceiling before finishing. Try a shorter question.</p>'; return; }
+      var g = b.grounding || { verified: true, violations: [] };
+      var badge = g.verified
+        ? '<span class="ask-badge grounded">grounded &#10003;</span>'
+        : '<span class="ask-badge withheld">explanation withheld</span>';
+      var dets = (b.determinations || []).filter(function (d) { return d && !d.is_error; }).map(renderDetermination).join("");
+      var cost = b.cost ? '<p class="ask-cost">' + esc(b.cost.calls) + " model call(s) &middot; $" + esc(b.cost.usd) + "</p>" : "";
+      host.innerHTML =
+        badge +
+        '<p class="ask-prose">' + esc(b.prose || "") + "</p>" +
+        (dets ? '<div class="why">The engine\'s determination (authoritative)</div>' + dets : "") +
+        '<p class="hint">' + esc(b.notice || "") + "</p>" + cost;
+      host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+    }).catch(function () { host.innerHTML = '<p class="muted">Could not reach the assistant. Please try again.</p>'; })
+      .then(function () { if (btn) btn.disabled = false; });
   });
 
   // ---- flow 00: scenario library (executable teaching) ----
@@ -335,9 +424,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     if (!results) return;
     var h = "";
     results.forEach(function (b, i) {
-      h += '<div class="s-run"><div class="why">' + esc(s.runs[i].label) + "</div>" + renderMini(s.runs[i].endpoint, b) + "</div>";
+      var run = (s.runs || [])[i] || {};
+      h += '<div class="s-run"><div class="why">' + esc(run.label) + "</div>" + renderMini(run.endpoint, b) + "</div>";
     });
-    h += '<div class="why">What to notice</div><ul class="reasons">' + s.notice.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
+    h += '<div class="why">What to notice</div><ul class="reasons">' + (s.notice || []).map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
     host.hidden = false;
     host.innerHTML = h;
   }
@@ -413,7 +503,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
         '<div class="verdict"><h3 class="mono">' + esc(val) + '</h3><span class="tag ' + (b.status === "final_rule" ? "ok" : "warn") + '">' + esc(b.status) + "</span></div>" +
         '<p class="muted mono">effective ' + esc(b.effective_date || "open start") + "</p>" +
         '<div class="why">Source</div><p style="font-size:0.85rem;color:#dce8f2;margin:0">' + esc(b.source_citation) + "</p>";
-    });
+    }).catch(function () { host.innerHTML = '<p class="muted">Could not look up the rule. Please try again.</p>'; });
   });
 
   $("b-sf").addEventListener("click", function () {
@@ -422,11 +512,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       var h = "";
       if (!b.has_data) { h += '<p class="muted">This database has no posted activity yet — the checks run against structure, so most pass vacuously. Seed a synthetic world to see real findings.</p>'; }
       h += b.criteria.map(function (c) {
-        var f = (c.findings && c.findings.length) ? '<div class="find">' + c.findings.map(esc).join("<br>") + "</div>" : "";
+        var f = (Array.isArray(c.findings) && c.findings.length) ? '<div class="find">' + c.findings.map(esc).join("<br>") + "</div>" : "";
         return '<div class="crit"><span class="st ' + (c.passed ? "pass" : "fail") + '">' + (c.passed ? "PASS" : "FAIL") + '</span><div class="txt"><b>' + esc(c.criterion) + "</b> — " + esc(c.name) + f + "</div></div>";
       }).join("");
       host.innerHTML = h;
-    });
+    }).catch(function () { host.innerHTML = '<p class="muted">Could not run the self-check. Please try again.</p>'; });
   });
 
   get("/api/reverify").then(function (b) {
