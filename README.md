@@ -39,6 +39,21 @@ legal judgment. Run `govcon about` for the tool's own limitations statement.
 4. **Penny-exact Decimal end to end** — a custom SQLAlchemy type keeps
    `decimal.Decimal` lossless on SQLite (plain NUMERIC round-trips through
    float); floats are rejected at bind time.
+5. **A guided web workbench + a grounded AI layer** — `govcon serve` puts a
+   self-contained, WCAG&nbsp;2.2&nbsp;AA UI over the same pure services. Over it,
+   four AI surfaces — *ask*, *tutor* (taught at your persona depth), *draft-rule*,
+   *draft-narrative* — call the deterministic engine **as tools** and never
+   decide: a grounding verifier withholds any figure or citation the engine
+   didn't return, the authoritative determination is always shown beside the
+   prose, and it streams over SSE. Rule-drafting can apply nothing — it only
+   proposes a human-reviewed migration (validated structurally, never executed).
+6. **Enterprise posture, still advisory** — a verified dual-backend port to
+   PostgreSQL (26 plpgsql triggers, advisory-locked audit chain), per-workspace
+   database isolation, rules-as-data decision tables (behaviour proven identical
+   to the coded logic against a frozen oracle), and optional per-user JWT auth so
+   every audit row is attributed to a **cryptographically verified** actor.
+   Authentication and real data stay separate switches — synthetic-data-only
+   throughout; no real-data mode, no certification.
 
 This engine was built **spec-first**: the regulatory reference, data model, and
 phased build plan were authored as a private design vault, and each phase was
@@ -49,9 +64,14 @@ this repository; the code, its tests, and this README are the artifact.
 
 ```sh
 uv sync
-uv run pytest                      # 170+ tests, one per business rule minimum
+uv run pytest                      # 330+ tests, one per business rule minimum
 uv run python scripts/demo.py      # end-to-end synthetic world → demo_out/
+uv run govcon serve --demo         # the guided web workbench on localhost:8000
 ```
+
+Optional extras: `--extra ai` (the grounded assistant, needs `ANTHROPIC_API_KEY`),
+`--extra auth` (per-user JWT), `--extra postgres` (dual-backend), `--extra frontend`
+(Playwright browser tests). Without them the core engine installs and tests unchanged.
 
 The demo migrates a fresh `demo.db`, posts costs through the real write path
 (allowability vectors stamped at capture), derives a fringe rate from the
@@ -68,6 +88,9 @@ uv run govcon audit verify               # recompute the audit-trail hash chain
 uv run govcon reverify                   # regulatory re-verification checkpoints + watch list
 uv run govcon export 2026 G              # render a generated schedule (--format md|xlsx)
 uv run govcon contract 1                 # complete financial picture of a contract
+uv run govcon rules show CAS_COVERAGE    # read a rules-as-data decision table
+uv run govcon watch scan                 # Federal-Register suggestions for human review
+uv run govcon serve --demo               # the guided web workbench (+ AI if a key is set)
 uv run govcon about                      # the tool's own limitations, stated plainly
 ```
 
@@ -78,15 +101,24 @@ Database URL defaults to `sqlite:///govcon.db` (gitignored); override with
 
 ```
 src/govcon/
-  core/       decimal config (the ONE place precision is set), errors, logging
+  core/       decimal config (the ONE place precision is set), errors, logging,
+              request-scoped actor identity
   db/         SafeNumeric type, session guards, hash-chained audit listener
-  models/     34 tables (SQLAlchemy 2.0, Postgres-compatible schema)
+  models/     37 tables (SQLAlchemy 2.0, dual-backend SQLite + Postgres schema)
   services/   allowability, rates, period close, ICE schedules, CAS/TINA,
               sweeps, REA/CDA, Eichleay, PBR monitoring, audit response,
-              variances, exporters, contract statement, SF 1408 self-check
+              variances, exporters, contract statement, SF 1408 self-check,
+              the decision-table engine (rules-as-data), rule-authoring validator
+  education/  the plain-language glossary + the executable scenario library
+  ai/         the grounded assistant kernel — tool registry, tool-use loop,
+              grounding verifier, synthetic-only gate, per-pattern wrappers
+  api/        FastAPI app + endpoints, HTTP hardening, optional JWT auth
+  web/        the self-contained guided workbench (inlined fonts, no CDN)
   seeds/      regulatory threshold + FAR 31.205 category constants (drift-tested
               against the frozen migration seeds)
-alembic/      14 migrations; triggers created alongside the tables they guard
+alembic/      18 migrations (0000–0017); triggers created alongside the tables
+              they guard, ported to plpgsql for Postgres
 tests/        every business rule asserted at BOTH layers (ORM error + raw-SQL
-              IntegrityError from the trigger)
+              IntegrityError from the trigger); AI dispatch/grounding/gating via
+              an injected fake; browser flows via Playwright
 ```
