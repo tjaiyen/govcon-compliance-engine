@@ -10,6 +10,8 @@ completely untouched by the browsing/what-if UI.
 from __future__ import annotations
 
 import datetime
+import enum
+import json
 import os
 import threading
 from collections import OrderedDict
@@ -86,6 +88,59 @@ def _money(raw: str) -> Decimal:
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
+
+
+class TutorPersona(str, enum.Enum):
+    """The five teaching depths — same data, different framing (mirrors the
+    guided UI's persona bar). An unknown value → 422 (Pydantic validation)."""
+
+    NEWCOMER = "newcomer"
+    ANALYST = "analyst"
+    CONTROLLER = "controller"
+    EXECUTIVE = "executive"
+    AUDITOR = "auditor"
+
+
+class TutorRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    persona: TutorPersona = TutorPersona.NEWCOMER
+
+
+class DraftRuleRequest(BaseModel):
+    instruction: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="Describe the regulatory change to draft a decision rule for.",
+    )
+
+
+class NarrativeRequest(BaseModel):
+    instruction: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="Describe the situation to draft a grounded memo/narrative for.",
+    )
+
+
+def _sse(evt: dict) -> str:
+    """Pack one event as an SSE ``data:`` frame (single unnamed event channel)."""
+    return "data: " + json.dumps(evt) + "\n\n"
+
+
+def _sse_response(events):
+    from fastapi.responses import StreamingResponse
+
+    return StreamingResponse(
+        events, media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _sse_single(evt: dict):
+    """A one-off SSE stream (an event + done) — e.g. AI-not-configured."""
+    def _one():
+        yield _sse(evt)
+        yield _sse({"type": "done"})
+
+    return _sse_response(_one())
 
 
 def create_app(session_factory=None, workspace_registry=None, llm_client=None) -> FastAPI:
@@ -213,48 +268,9 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         }
 
     # ------------------------------------------------------------ AI assistant
-    @app.post("/api/ask")
-    def ask(
-        req: AskRequest, request: Request, session: Session = Depends(get_session)
-    ) -> dict:
-        """Conversational query (Pattern 1): a plain-English question → the AI
-        calls the deterministic engine as tools → a grounded answer that ALWAYS
-        returns the authoritative determination beside the prose. The AI never
-        makes the determination; unverified prose is withheld."""
-        if llm_client is None:
-            return {"ai_available": False, "reason": "AI is not configured on this server"}
-        from fastapi import HTTPException as _HTTPException
-
-        from govcon.ai.errors import CostCeilingError, SyntheticGateError
-        from govcon.ai.gate import assert_synthetic
-        from govcon.ai.patterns import ask as run_ask
-        from govcon.api.hardening import _client_key
-
-        if not ask_limiter.allow(_client_key(request)):
-            raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
-
-        try:
-            assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
-        except SyntheticGateError as exc:
-            return {"ai_available": False, "reason": str(exc)}
-        # Hard per-request USD ceiling so a single /api/ask cannot drive
-        # unbounded Claude spend (GOVCON_AI_MAX_USD, default $0.50). Combined
-        # with the rate limiter below, this bounds AI cost-DoS.
-        try:
-            max_usd = Decimal(os.environ.get("GOVCON_AI_MAX_USD", "0.50"))
-        except (InvalidOperation, TypeError):
-            max_usd = Decimal("0.50")
-        try:
-            result = run_ask(
-                llm_client,
-                session,
-                req.question,
-                actor=current_actor(),
-                workspace=request.headers.get("x-govcon-workspace") or "default",
-                max_usd=max_usd,
-            )
-        except CostCeilingError as exc:
-            return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
+    def _grounded_envelope(result) -> dict:
+        """The default AI response shape: prose + the authoritative determination(s)
+        + grounding + cost. Used by /api/ask and /api/tutor."""
         return {
             "ai_available": True,
             "prose": result.prose,
@@ -269,6 +285,247 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 "determination above is the authoritative result."
             ),
         }
+
+    def _serve_ai(request: Request, run, *, envelope=None, extra: dict | None = None) -> dict:
+        """Shared plumbing for every AI pattern endpoint: rate limit → synthetic
+        gate → per-request USD ceiling → run → pattern envelope. ``run`` is a
+        callable ``(max_usd) -> AITurnResult`` capturing the pattern + inputs;
+        ``envelope`` builds the pattern-specific response (defaults to the
+        grounded shape). One loop of guardrails for every AI route (no drift)."""
+        from fastapi import HTTPException as _HTTPException
+
+        from govcon.ai.errors import CostCeilingError, SyntheticGateError
+        from govcon.ai.gate import assert_synthetic
+        from govcon.api.hardening import _client_key
+
+        if not ask_limiter.allow(_client_key(request)):
+            raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
+        try:
+            assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
+        except SyntheticGateError as exc:
+            return {"ai_available": False, "reason": str(exc)}
+        # Hard per-request USD ceiling so a single AI call cannot drive unbounded
+        # Claude spend (GOVCON_AI_MAX_USD, default $0.50). With the rate limiter
+        # above, this bounds AI cost-DoS.
+        try:
+            max_usd = Decimal(os.environ.get("GOVCON_AI_MAX_USD", "0.50"))
+        except (InvalidOperation, TypeError):
+            max_usd = Decimal("0.50")
+        try:
+            result = run(max_usd)
+        except CostCeilingError as exc:
+            return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
+        out = (envelope or _grounded_envelope)(result)
+        out.update(extra or {})
+        return out
+
+    def _serve_ai_stream(request: Request, factory):
+        """SSE variant of _serve_ai: the SAME rate-limit + synthetic gate + USD
+        ceiling, but stream the loop's events (status → determination(s) →
+        grounding → prose → cost → done) as they resolve. ``factory(max_usd)``
+        yields event dicts (see patterns.stream_pattern)."""
+        from fastapi import HTTPException as _HTTPException
+
+        from govcon.ai.errors import CostCeilingError, SyntheticGateError
+        from govcon.ai.gate import assert_synthetic
+        from govcon.api.hardening import _client_key
+
+        if not ask_limiter.allow(_client_key(request)):
+            raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
+
+        def _events():
+            try:
+                assert_synthetic()
+            except SyntheticGateError as exc:
+                yield _sse({"type": "unavailable", "reason": str(exc)})
+                yield _sse({"type": "done"})
+                return
+            try:
+                max_usd = Decimal(os.environ.get("GOVCON_AI_MAX_USD", "0.50"))
+            except (InvalidOperation, TypeError):
+                max_usd = Decimal("0.50")
+            try:
+                for evt in factory(max_usd):
+                    yield _sse(evt)
+            except CostCeilingError as exc:
+                yield _sse({"type": "error", "cost_exceeded": True, "message": str(exc)})
+            except SyntheticGateError as exc:  # belt-and-suspenders vs kernel gate
+                yield _sse({"type": "unavailable", "reason": str(exc)})
+            yield _sse({"type": "done"})
+
+        return _sse_response(_events())
+
+    def _maybe_stream(request: Request, pattern: str, text: str, *, persona: str | None = None):
+        """If ``?stream`` is set, return an SSE StreamingResponse for a streamable
+        pattern; else return None so the caller falls through to the JSON path.
+
+        The stream outlives the request's Depends(get_session) scope, so it opens
+        its OWN session on the resolved workspace factory and closes it in a
+        finally when iteration ends (or errors)."""
+        if not request.query_params.get("stream"):
+            return None
+        from govcon.ai.patterns import STREAMABLE, stream_pattern
+
+        if pattern not in STREAMABLE:
+            return None
+        if llm_client is None:
+            return _sse_single({"type": "unavailable", "reason": "AI is not configured on this server"})
+        workspace = request.headers.get("x-govcon-workspace") or "default"
+        actor = current_actor()
+
+        def factory(max_usd):
+            session = _factory_for(request)()
+            try:
+                yield from stream_pattern(
+                    llm_client, session, text, pattern=pattern, persona=persona,
+                    actor=actor, workspace=workspace, max_usd=max_usd,
+                )
+            finally:
+                session.close()
+
+        return _serve_ai_stream(request, factory)
+
+    @app.post("/api/ask")
+    def ask(
+        req: AskRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """Conversational query (Pattern 1): a plain-English question → the AI
+        calls the deterministic engine as tools → a grounded answer that ALWAYS
+        returns the authoritative determination beside the prose. The AI never
+        makes the determination; unverified prose is withheld. Pass ``?stream=1``
+        for an SSE stream of the determinations + grounded prose as they resolve."""
+        streamed = _maybe_stream(request, "ask", req.question)
+        if streamed is not None:
+            return streamed
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import ask as run_ask
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_ask(
+                llm_client,
+                session,
+                req.question,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+        )
+
+    @app.post("/api/tutor")
+    def tutor(
+        req: TutorRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """AI tutor (Pattern 2): the same grounded engine-as-tools loop as
+        /api/ask, but taught at the requested ``persona``'s depth. Same
+        authoritative-determination-beside-prose contract; same withhold-on-
+        ungrounded discipline. Teaching depth never changes the determination.
+        Pass ``?stream=1`` for an SSE stream (persona taken from the body)."""
+        streamed = _maybe_stream(request, "tutor", req.question, persona=req.persona.value)
+        if streamed is not None:
+            return streamed
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import tutor as run_tutor
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_tutor(
+                llm_client,
+                session,
+                req.question,
+                persona=req.persona.value,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+            extra={"persona": req.persona.value},
+        )
+
+    @app.post("/api/draft-rule")
+    def draft_rule(
+        req: DraftRuleRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """Rule-authoring (Pattern 3): describe a regulatory change → the AI drafts
+        a decision-table rule and validates it STRUCTURALLY → returns the draft for
+        a human-reviewed migration. It applies NOTHING and writes NOTHING (B53):
+        the response always carries ``requires_human_migration: true``."""
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import draft_rule as run_draft
+
+        def _draft_envelope(result) -> dict:
+            # The drafted rule is the input to the LAST validate_draft_rule call;
+            # its result is the validation. (No validate call → no validated draft.)
+            draft, validation = None, None
+            for d in result.determinations:
+                if d["tool"] == "validate_draft_rule" and not d["is_error"]:
+                    draft = (d["input"] or {}).get("rule", d["input"])
+                    validation = d["result"]
+            return {
+                "ai_available": True,
+                "prose": result.prose,
+                "draft": draft,
+                "validation": validation,
+                "requires_human_migration": True,
+                "grounding": {
+                    "verified": result.grounding.verified,
+                    "violations": result.grounding.violations,
+                },
+                "cost": result.cost.as_dict(),
+                "notice": (
+                    "DRAFT only — a proposal for a human-reviewed migration. Nothing "
+                    "was applied, saved, or put in force. Synthetic data."
+                ),
+            }
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_draft(
+                llm_client,
+                session,
+                req.instruction,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+            envelope=_draft_envelope,
+        )
+
+    @app.post("/api/draft-narrative")
+    def draft_narrative(
+        req: NarrativeRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """Narrative drafter (Pattern 4): describe a situation → the AI drafts a
+        memo grounded ENTIRELY in the engine's computed numbers, returned beside
+        the authoritative determination. Strictest grounding (an ungrounded figure
+        withholds the memo). A SYNTHETIC, advisory draft — never a filing.
+        Pass ``?stream=1`` for an SSE stream."""
+        streamed = _maybe_stream(request, "draft_narrative", req.instruction)
+        if streamed is not None:
+            return streamed
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import draft_narrative as run_narrative
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_narrative(
+                llm_client,
+                session,
+                req.instruction,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+            extra={
+                "synthetic_banner": (
+                    "SYNTHETIC DATA — DRAFT NARRATIVE FOR INTERNAL REVIEW, NOT FOR "
+                    "FILING OR CERTIFICATION"
+                )
+            },
+        )
 
     # ---------------------------------------------------------------- the UI
     @app.get("/", response_class=HTMLResponse)

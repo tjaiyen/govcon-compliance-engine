@@ -93,7 +93,9 @@ details.gloss .g-body { padding: 0 0 14px; font-size: 0.88rem; color: #bcd0e0; }
 .tag.ok::before { content: "\2713\00a0"; } .tag.warn::before { content: "\26a0\00a0"; } .tag.stop::before { content: "\2715\00a0"; } .tag.info::before { content: "\2139\00a0"; }
 .result:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* Ask card */
-#ask-q { width: 100%; min-height: 64px; background: #0d2236; border: 1px solid rgba(159,184,205,0.34); border-radius: 4px; color: #eaf2f9; font-family: inherit; font-size: 0.92rem; padding: 10px 12px; resize: vertical; }
+#ask-q, #tutor-q, #draft-q { width: 100%; min-height: 64px; background: #0d2236; border: 1px solid rgba(159,184,205,0.34); border-radius: 4px; color: #eaf2f9; font-family: inherit; font-size: 0.92rem; padding: 10px 12px; resize: vertical; }
+.draft-json { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; background: #0d2236; border: 1px solid rgba(159,184,205,0.28); border-radius: 4px; padding: 10px 12px; margin: 8px 0; overflow-x: auto; white-space: pre; color: #cfe0ee; }
+.ai-banner { display: block; margin: 0 0 10px; }
 .ask-badge { font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 3px; border: 1px solid; }
 .ask-badge.grounded { color: #46d39a; border-color: rgba(70,211,154,0.5); } .ask-badge.withheld { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .ask-prose { font-size: 0.95rem; color: #eaf2f9; line-height: 1.6; margin: 10px 0; }
@@ -145,6 +147,37 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       <button type="submit">Ask</button>
     </form>
     <div class="result" id="r-ask" tabindex="-1" aria-live="polite" hidden></div>
+  </section>
+
+  <!-- ============ AI tutor (Pattern 2) ============ -->
+  <section class="card" id="tutor-card">
+    <p class="eyebrow-sm">Flow 00 &middot; Learn it (AI tutor)</p>
+    <h2>Get it taught at your level</h2>
+    <p class="sub">The same grounded engine-as-tools answer as Ask, taught at the depth of the persona you picked above (Newcomer &rarr; Auditor). Teaching depth never changes the determination. Synthetic data only.</p>
+    <form id="f-tutor">
+      <label for="tutor-q">What do you want to understand?</label>
+      <textarea id="tutor-q" maxlength="2000" placeholder="e.g. Why does a $12M award on 2026-05-15 get modified CAS coverage?"></textarea>
+      <button type="submit">Teach me</button>
+    </form>
+    <div class="result" id="r-tutor" tabindex="-1" aria-live="polite" hidden></div>
+  </section>
+
+  <!-- ============ AI drafting (Patterns 3 & 4) ============ -->
+  <section class="card" id="draft-card">
+    <p class="eyebrow-sm">Flow 00 &middot; Draft (advanced)</p>
+    <h2>Draft a rule or a memo</h2>
+    <p class="sub">Rule-authoring drafts a decision-table rule for a <strong>human-reviewed migration</strong> &mdash; it applies nothing. Narrative drafts a memo grounded entirely in the engine's numbers. Both are synthetic, advisory drafts.</p>
+    <form id="f-draft">
+      <label for="draft-mode">What to draft</label>
+      <select id="draft-mode">
+        <option value="draft-rule">Decision rule (for human migration)</option>
+        <option value="draft-narrative">Memo / narrative</option>
+      </select>
+      <label for="draft-q">Describe it</label>
+      <textarea id="draft-q" maxlength="2000" placeholder="e.g. Draft a rule for a new CAS full-coverage threshold effective 2026-08-01"></textarea>
+      <button type="submit">Draft</button>
+    </form>
+    <div class="result" id="r-draft" tabindex="-1" aria-live="polite" hidden></div>
   </section>
 
   <!-- ============ scenario library (Phase 2) ============ -->
@@ -386,33 +419,127 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     var val = r.value != null ? "$" + esc(r.value) : (r.status ? esc(r.status) : "");
     return '<div class="watch-item"><span class="kind">[' + esc(d.tool) + "]</span> " + val + "</div>";
   }
-  $("f-ask").addEventListener("submit", function (e) {
-    e.preventDefault();
-    var q = ($("ask-q").value || "").trim();
-    var host = $("r-ask"); var btn = e.target.querySelector('[type="submit"]');
-    if (!q) { host.hidden = false; host.innerHTML = '<p class="muted">Type a question first.</p>'; return; }
-    if (btn) btn.disabled = true;
-    host.hidden = false; host.innerHTML = '<p class="muted">Asking the engine…</p>';
-    post("/api/ask", { question: q }).then(function (b) {
-      if (b.ai_available === false) {
-        host.innerHTML = '<p class="muted">The assistant is not enabled on this server' + (b.reason ? " (" + esc(b.reason) + ")" : "") + ".</p>";
-        return;
-      }
-      if (b.cost_exceeded) { host.innerHTML = '<p class="muted">That question hit the cost ceiling before finishing. Try a shorter question.</p>'; return; }
-      var g = b.grounding || { verified: true, violations: [] };
-      var badge = g.verified
+  // shared: not-enabled / cost-ceiling short-circuits (true = handled, stop)
+  function aiUnavailable(host, b) {
+    if (b.ai_available === false) {
+      host.innerHTML = '<p class="muted">The assistant is not enabled on this server' + (b.reason ? " (" + esc(b.reason) + ")" : "") + ".</p>";
+      return true;
+    }
+    if (b.cost_exceeded) { host.innerHTML = '<p class="muted">That hit the cost ceiling before finishing. Try a shorter request.</p>'; return true; }
+    return false;
+  }
+  // shared grounded render (Ask, Tutor, Narrative): badge + prose + the
+  // authoritative determination + notice + cost. `banner` is optional prefix HTML.
+  function renderGrounded(host, b, banner) {
+    if (aiUnavailable(host, b)) return;
+    var g = b.grounding || { verified: true, violations: [] };
+    var badge = g.verified
+      ? '<span class="ask-badge grounded">grounded &#10003;</span>'
+      : '<span class="ask-badge withheld">explanation withheld</span>';
+    var dets = (b.determinations || []).filter(function (d) { return d && !d.is_error; }).map(renderDetermination).join("");
+    var cost = b.cost ? '<p class="ask-cost">' + esc(b.cost.calls) + " model call(s) &middot; $" + esc(b.cost.usd) + "</p>" : "";
+    host.innerHTML =
+      (banner || "") + badge +
+      '<p class="ask-prose">' + esc(b.prose || "") + "</p>" +
+      (dets ? '<div class="why">The engine\'s determination (authoritative)</div>' + dets : "") +
+      '<p class="hint">' + esc(b.notice || "") + "</p>" + cost;
+    host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+  }
+  // SSE consumer (fetch + ReadableStream): renders determinations as they
+  // resolve, then the grounded prose. Same final DOM as renderGrounded. Falls
+  // back gracefully — the caller's .catch shows a retry message on any failure.
+  function streamGrounded(url, body, host) {
+    var dets = [], prose = "", grounding = { verified: true }, cost = null, stopped = false;
+    function paint() {
+      var badge = grounding.verified
         ? '<span class="ask-badge grounded">grounded &#10003;</span>'
         : '<span class="ask-badge withheld">explanation withheld</span>';
-      var dets = (b.determinations || []).filter(function (d) { return d && !d.is_error; }).map(renderDetermination).join("");
-      var cost = b.cost ? '<p class="ask-cost">' + esc(b.cost.calls) + " model call(s) &middot; $" + esc(b.cost.usd) + "</p>" : "";
-      host.innerHTML =
-        badge +
-        '<p class="ask-prose">' + esc(b.prose || "") + "</p>" +
-        (dets ? '<div class="why">The engine\'s determination (authoritative)</div>' + dets : "") +
-        '<p class="hint">' + esc(b.notice || "") + "</p>" + cost;
-      host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
-    }).catch(function () { host.innerHTML = '<p class="muted">Could not reach the assistant. Please try again.</p>'; })
-      .then(function () { if (btn) btn.disabled = false; });
+      var detHtml = dets.filter(function (d) { return d && !d.is_error; }).map(renderDetermination).join("");
+      var costHtml = cost ? '<p class="ask-cost">' + esc(cost.calls) + " model call(s) &middot; $" + esc(cost.usd) + "</p>" : "";
+      host.innerHTML = badge +
+        (prose ? '<p class="ask-prose">' + esc(prose) + "</p>" : '<p class="muted">Working&hellip;</p>') +
+        (detHtml ? '<div class="why">The engine\'s determination (authoritative)</div>' + detHtml : "") + costHtml;
+    }
+    function handle(evt) {
+      if (evt.type === "unavailable") { host.innerHTML = '<p class="muted">The assistant is not enabled on this server' + (evt.reason ? " (" + esc(evt.reason) + ")" : "") + ".</p>"; stopped = true; }
+      else if (evt.type === "error") { host.innerHTML = '<p class="muted">' + (evt.cost_exceeded ? "That hit the cost ceiling before finishing." : esc(evt.message || "Something went wrong.")) + "</p>"; stopped = true; }
+      else if (evt.type === "determination") { dets.push(evt.determination); paint(); }
+      else if (evt.type === "grounding") { grounding = evt; }
+      else if (evt.type === "prose") { prose = evt.text; paint(); }
+      else if (evt.type === "cost") { cost = evt.cost; paint(); }
+    }
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (resp) {
+        var reader = resp.body.getReader(), decoder = new TextDecoder(), buf = "";
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) return;
+            buf += decoder.decode(r.value, { stream: true });
+            var parts = buf.split("\n\n"); buf = parts.pop();
+            parts.forEach(function (p) {
+              var s = p.trim();
+              if (s.indexOf("data: ") === 0) { try { handle(JSON.parse(s.slice(6))); } catch (e) {} }
+            });
+            return pump();
+          });
+        }
+        return pump().then(function () {
+          if (!stopped && !prose && !dets.length) host.innerHTML = '<p class="muted">No response.</p>';
+          host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+        });
+      });
+  }
+  // generic submit wiring for an AI card: validate input, disable, POST, render
+  function wireAiForm(formId, inputId, hostId, working, build) {
+    $(formId).addEventListener("submit", function (e) {
+      e.preventDefault();
+      var q = ($(inputId).value || "").trim();
+      var host = $(hostId); var btn = e.target.querySelector('[type="submit"]');
+      if (!q) { host.hidden = false; host.innerHTML = '<p class="muted">Type something first.</p>'; return; }
+      if (btn) btn.disabled = true;
+      host.hidden = false; host.innerHTML = '<p class="muted">' + working + "</p>";
+      build(q, host).then(function (b) { return b; })
+        .catch(function () { host.innerHTML = '<p class="muted">Could not reach the assistant. Please try again.</p>'; })
+        .then(function () { if (btn) btn.disabled = false; });
+    });
+  }
+
+  wireAiForm("f-ask", "ask-q", "r-ask", "Asking the engine…", function (q, host) {
+    // stream determinations + grounded prose as they resolve (SSE)
+    return streamGrounded("/api/ask?stream=1", { question: q }, host);
+  });
+
+  wireAiForm("f-tutor", "tutor-q", "r-tutor", "Teaching…", function (q, host) {
+    // streams; routes through the persona selected in the persona bar above
+    return streamGrounded("/api/tutor?stream=1", { question: q, persona: persona }, host);
+  });
+
+  function renderDraftRule(host, b) {
+    if (aiUnavailable(host, b)) return;
+    var v = b.validation || {};
+    var mig = '<div class="ask-badge withheld ai-banner">Requires a human-reviewed migration — nothing was applied.</div>';
+    var badge = v.valid
+      ? '<span class="ask-badge grounded">valid draft &#10003;</span>'
+      : '<span class="ask-badge withheld">draft has errors</span>';
+    var draft = b.draft
+      ? '<div class="why">Draft rule</div><pre class="draft-json">' + esc(JSON.stringify(b.draft, null, 2)) + "</pre>"
+      : '<p class="muted">No validated draft was produced.</p>';
+    var errs = (v.errors && v.errors.length)
+      ? '<div class="why">Validation errors</div><ul class="reasons">' + v.errors.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>"
+      : "";
+    var cost = b.cost ? '<p class="ask-cost">' + esc(b.cost.calls) + " model call(s) &middot; $" + esc(b.cost.usd) + "</p>" : "";
+    host.innerHTML = mig + badge + '<p class="ask-prose">' + esc(b.prose || "") + "</p>" + draft + errs +
+      '<p class="hint">' + esc(b.notice || "") + "</p>" + cost;
+    host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+  }
+
+  wireAiForm("f-draft", "draft-q", "r-draft", "Drafting…", function (q, host) {
+    var mode = $("draft-mode").value;  // draft-rule | draft-narrative
+    return post("/api/" + mode, { instruction: q }).then(function (b) {
+      if (mode === "draft-rule") { renderDraftRule(host, b); return; }
+      var banner = b.synthetic_banner ? '<div class="ask-badge withheld ai-banner">' + esc(b.synthetic_banner) + "</div>" : "";
+      renderGrounded(host, b, banner);
+    });
   });
 
   // ---- flow 00: scenario library (executable teaching) ----

@@ -197,3 +197,14 @@ def test_index_has_ask_ui_and_a11y_landmarks(session_factory):
     assert 'class="skip"' in html and '<main id="main"' in html
     assert ".tag.ok::before" in html and "@media print" in html
     assert "function parseMoney" in html
+
+
+def test_index_has_tutor_and_drafting_ui(session_factory):
+    """All four AI patterns are reachable in the workbench: ask, tutor, and the
+    two drafting modes (rule + narrative)."""
+    html = client(session_factory).get("/").text
+    assert 'id="f-tutor"' in html and "/api/tutor" in html
+    assert 'id="f-draft"' in html
+    assert 'value="draft-rule"' in html and 'value="draft-narrative"' in html
+    # the never-auto-apply guardrail is surfaced in the drafting card copy
+    assert "human-reviewed migration" in html

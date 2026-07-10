@@ -73,6 +73,13 @@ _UNARY = {
 }
 _ORDERED = {"lt", "le", "gt", "ge"}
 
+#: Public, read-only views of the grammar so an authoring VALIDATOR can check a
+#: proposed when_ast structurally without importing the private tables (and
+#: without ever executing a rule — see govcon.services.rule_authoring).
+COMPARISON_OPS = frozenset(_COMPARISONS)
+UNARY_OPS = frozenset(_UNARY)
+ORDERED_OPS = frozenset(_ORDERED)
+
 
 @dataclass
 class TableEvaluation:

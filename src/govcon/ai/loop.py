@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from govcon.ai.client import LLMClient
 from govcon.ai.cost import CostLog
-from govcon.ai.dispatch import DispatchResult, GroundingLedger, dispatch
+from govcon.ai.dispatch import GroundingLedger, dispatch
 from govcon.ai.grounding import GroundingResult, GroundingVerifier
 from govcon.ai.registry import tool_definitions
 
@@ -43,7 +43,7 @@ def _wrap_untrusted(text: str) -> str:
     )
 
 
-def run_conversation(
+def iter_conversation(
     client: LLMClient,
     session: Session,
     *,
@@ -52,15 +52,24 @@ def run_conversation(
     user_text: str,
     cost_log: CostLog,
     max_turns: int = _MAX_TURNS,
-) -> AITurnResult:
+):
+    """The loop as a GENERATOR: it yields progress events ({"type": "status"} per
+    model turn, {"type": "determination", ...} as each tool resolves) and, on
+    completion, RETURNS the final AITurnResult (accessible via StopIteration.value).
+
+    Two consumers share this one loop: ``run_conversation`` drains it for the
+    non-streaming endpoints; the SSE endpoints iterate it to stream determinations
+    to the client as they resolve. No LLM call is ever on the determination path —
+    the loop only calls pure services and quotes them."""
     tools = tool_definitions(tool_names)
     ledger = GroundingLedger()
-    determinations: list[DispatchResult] = []
+    det_dicts: list[dict] = []
     messages: list[dict] = [{"role": "user", "content": _wrap_untrusted(user_text)}]
 
     stop_reason = "end_turn"
     final_text = ""
     for _ in range(max_turns):
+        yield {"type": "status", "message": "consulting the engine"}
         resp = client.create(system=system, messages=messages, tools=tools)
         cost_log.record(resp.model, resp.input_tokens, resp.output_tokens)
         final_text = resp.text
@@ -80,7 +89,12 @@ def run_conversation(
         tool_results = []
         for tu in resp.tool_uses:
             result = dispatch(session, tu.name, tu.input, ledger)
-            determinations.append(result)
+            det = {
+                "tool": result.tool, "input": result.input,
+                "result": result.result, "is_error": result.is_error,
+            }
+            det_dicts.append(det)
+            yield {"type": "determination", "determination": det}
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -94,11 +108,31 @@ def run_conversation(
     grounding = GroundingVerifier().verify(final_text, ledger)
     return AITurnResult(
         prose=final_text,
-        determinations=[
-            {"tool": d.tool, "input": d.input, "result": d.result, "is_error": d.is_error}
-            for d in determinations
-        ],
+        determinations=det_dicts,
         grounding=grounding,
         cost=cost_log,
         stop_reason=stop_reason,
     )
+
+
+def run_conversation(
+    client: LLMClient,
+    session: Session,
+    *,
+    system: str,
+    tool_names: list[str],
+    user_text: str,
+    cost_log: CostLog,
+    max_turns: int = _MAX_TURNS,
+) -> AITurnResult:
+    """Drain ``iter_conversation`` and return its final result (the non-streaming
+    path — behaviour unchanged for existing callers)."""
+    gen = iter_conversation(
+        client, session, system=system, tool_names=tool_names,
+        user_text=user_text, cost_log=cost_log, max_turns=max_turns,
+    )
+    try:
+        while True:
+            next(gen)
+    except StopIteration as stop:
+        return stop.value

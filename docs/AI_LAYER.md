@@ -18,9 +18,11 @@ tables stay pure). Same inputs → same determination, regardless of whether an 
    Each tool's `run(session, input)` mirrors the corresponding `/api/*` endpoint: builds a
    transient (unsaved) model object, calls the real service, returns its grounding payload.
    No tool writes; no tool computes a determination the model could fabricate.
-2. **`loop.py`** — one shared tool-use loop. Wraps the user's question in `<user_input>`
-   (untrusted DATA, never instructions — B13), calls the model, executes every requested
-   tool via `dispatch.py` under the real DB session, feeds results back, repeats.
+2. **`loop.py`** — one shared tool-use loop, exposed two ways: `iter_conversation` is a
+   **generator** that yields progress + determination events and returns the final result;
+   `run_conversation` drains it for the non-streaming path. Wraps the user's question in
+   `<user_input>` (untrusted DATA, never instructions — B13), calls the model, executes
+   every requested tool via `dispatch.py` under the real DB session, feeds results back.
 3. **`dispatch.py`** — runs tools and records every returned value/citation into a
    **grounding ledger** (including numbers embedded in reason strings).
 4. **`grounding.py`** — after the loop, extracts every dollar figure + citation from the
@@ -29,16 +31,74 @@ tables stay pure). Same inputs → same determination, regardless of whether an 
    (degrade, never 500).
 5. **`gate.py`** — synthetic-only, fail-closed. `GOVCON_DATA_MODE` (default `synthetic`);
    any other value refuses the AI. Enforced at the HTTP boundary AND kernel entry.
-6. **`cost.py`** — every model call is token+cost logged (ai-ml.md) and totalled in the
-   response.
+6. **`patterns.py`** — one `_pattern_config` (system prompt + tool subset per pattern) and
+   one `run_pattern` back all four patterns; `stream_pattern` is the streaming variant over
+   the same loop. Both apply the same gate + grounding + withhold-on-ungrounded.
+7. **`cost.py`** — every model call is token+cost logged (ai-ml.md) and totalled in the
+   response; a per-request USD ceiling (`GOVCON_AI_MAX_USD`) bounds spend.
 
-## Endpoints
+## The four patterns (one kernel, four surfaces)
 
-- `POST /api/ask` `{question}` → `{ai_available, prose, determinations[], grounding{verified,
-  violations}, cost, notice}`. The determination is **always** returned beside the prose.
-  If `llm_client` is not configured, `{ai_available: false}` — the engine runs unchanged.
+They differ ONLY by system prompt + tool subset + endpoint:
 
-(Phase B–D add `/api/tutor`, `/api/draft-rule`, `/api/draft-narrative` on the same kernel.)
+| Pattern | Endpoint | What it does | Guardrail highlight |
+|---|---|---|---|
+| Ask | `POST /api/ask` `{question}` | plain-English Q&A | grounded prose beside the determination |
+| Tutor | `POST /api/tutor` `{question, persona}` | teaches at a persona's depth (newcomer…auditor) | depth never changes the determination |
+| Rule-authoring | `POST /api/draft-rule` `{instruction}` | drafts a decision-table rule + validates it structurally | **auto-apply structurally impossible** (see below) |
+| Narrative | `POST /api/draft-narrative` `{instruction}` | a memo grounded entirely in computed numbers | strictest grounding; SYNTHETIC "not for filing" banner |
+
+Every response returns the authoritative determination(s) beside the prose, plus
+`grounding{verified, violations}` and `cost`. If `llm_client` is not configured,
+`{ai_available: false}` — the engine runs unchanged.
+
+### Rule-authoring can apply nothing (B53)
+
+The rule-authoring pattern drafts a rule for a **human-reviewed migration** — never an
+applied change. This is structural, not a policy:
+
+- The validator (`services/rule_authoring.py`) parses a proposed `when_ast` against the
+  engine grammar and checks the reason template. It **never executes** a rule (no
+  `_matches`/`evaluate_table`), **never writes** (no Session mutation), and **never imports
+  Alembic** — it imports only the grammar's operator *names*.
+- `DRAFT_RULE_TOOLS` has **no write tool and no evaluate tool**.
+- Every response carries `requires_human_migration: true`; a test asserts the
+  `decision_tables`/`decision_rules` row counts are unchanged after a draft.
+
+## Authentication (`src/govcon/api/auth.py`)
+
+Optional, env-gated per-user JWT auth (`uv sync --extra auth`). Off by default: the audit
+actor is asserted from `X-Govcon-User`. Configure exactly one signing source
+(`GOVCON_JWT_SECRET` | `GOVCON_JWT_PUBLIC_KEY` | `GOVCON_JWT_JWKS_URL`, plus
+`GOVCON_JWT_ISSUER`/`AUDIENCE`) and every gated `/api/*` requires a valid bearer token; the
+audit actor becomes a verified `auth:<sub>` and the header is ignored. Algorithm-confusion
+defense (algs from key type, never the token header), `exp`/`nbf`/`iss`/`aud` validated,
+JWKS fail-closed, fail-closed on any error. An optional `GOVCON_JWT_REQUIRED_SCOPE` gates
+the expensive AI routes (ask/tutor/draft-rule/draft-narrative) → 403. **Auth ≠ real-data:**
+it does not touch the synthetic gate. `/health`, `/`, and `/api/about` stay public. See
+[DEPLOY.md](DEPLOY.md) for the full env table.
+
+## Streaming (SSE)
+
+`?stream=1` on `/api/ask`, `/api/tutor`, `/api/draft-narrative` returns a
+`text/event-stream` with the SAME rate limit + synthetic gate + USD ceiling as the JSON
+path. Events: `status` → `determination` (one per tool as it resolves) → `grounding` →
+`prose` → `cost` → `done`. It streams over the exact same loop as the batch path
+(`iter_conversation`), so a streamed answer cannot diverge from a batch one. The workbench
+Ask + Tutor cards consume it via `fetch` + a `ReadableStream` reader.
+
+### Why this is *event*-level, not token-level (a deliberate boundary)
+
+Token-level streaming — the final prose appearing word-by-word from Claude — is **not
+built, on purpose.** It conflicts with the layer's core safety property: `grounding.py`
+verifies the *complete* prose before it is shown, and withholds it if any number is
+ungrounded. Streaming tokens live would surface unverified figures (a hallucinated
+`$500,000,000`) before the verifier can withhold them — even transiently, that breaks the
+"never present an unverified value" guarantee. Buffering tokens until grounding passes
+would restore safety but add no perceived-latency benefit over the current behavior. So the
+layer streams what is *already trustworthy the moment it exists* — the engine's
+determinations — and reveals the AI prose only once grounded. That is the correct trade for
+a compliance tool.
 
 ## Running it
 
@@ -55,12 +115,15 @@ the AI endpoints report unavailable and everything else works.
 ## Testing
 
 Deterministic: a `FakeLLMClient` (scripted tool_use turns → canned text) is injected exactly
-as `session_factory` is. Tests assert on dispatch, grounding, gating, and cost — never on
-prose. `tests/ai/test_ai_live_smoke.py` hits the real API once (skipped without a key) and
-asserts only that a determination came back grounded.
+as `session_factory` is. Tests assert on dispatch, grounding, gating, cost, streaming
+events, and the B53 no-write proofs — never on prose. Browser tests (`tests/frontend`, the
+`frontend` extra) drive the real UI incl. the streaming Ask/Tutor cards.
+`tests/ai/test_ai_live_smoke.py` hits the real API once (skipped without a key) and asserts
+only that a determination came back grounded.
 
 ## Future — real-data mode
 
 Real data would route to a **local model** (Ollama) behind the same `LLMClient` Protocol so
 nothing leaves the machine; the gate flips from "refuse" to "route local." v1 is
-Claude-API-synthetic-only; the Protocol is the drop-in seam.
+Claude-API-synthetic-only; the Protocol is the drop-in seam. (Real-data mode remains behind
+the Phase-5 liability line; per-user auth is shipped but real-data/RLS/certification are not.)
