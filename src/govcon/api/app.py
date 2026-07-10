@@ -192,6 +192,47 @@ def create_app(session_factory=None) -> FastAPI:
             ],
         }
 
+    @app.get("/api/suggestions")
+    def suggestions(session: Session = Depends(get_session)) -> dict:
+        """Regulation-watch inbox, read-only. Scanning (network + writes) and
+        reviewing stay CLI-only on purpose — the workbench never mutates."""
+        import sqlalchemy as sa
+
+        from govcon.models import RegulatorySuggestion
+
+        rows = (
+            session.execute(
+                sa.select(RegulatorySuggestion).order_by(
+                    RegulatorySuggestion.strong_match.desc(),
+                    RegulatorySuggestion.publication_date.desc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            "suggestions": [
+                {
+                    "suggestion_id": r.suggestion_id,
+                    "watch_rule": r.watch_rule,
+                    "document_number": r.document_number,
+                    "doc_type": r.doc_type,
+                    "title": r.title,
+                    "publication_date": (
+                        None if r.publication_date is None
+                        else r.publication_date.isoformat()
+                    ),
+                    "effective_on": (
+                        None if r.effective_on is None else r.effective_on.isoformat()
+                    ),
+                    "url": r.url,
+                    "strong_match": r.strong_match,
+                    "status": r.status.value,
+                }
+                for r in rows
+            ]
+        }
+
     # --------------------------------------------------------------- education
     @app.get("/api/glossary")
     def glossary() -> dict:
