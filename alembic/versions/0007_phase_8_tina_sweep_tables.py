@@ -64,15 +64,16 @@ def upgrade() -> None:
 
     # §0.1: a TINA baseline is locked (immutable) once created — the dates
     # and contract/action linkage never change; only the workflow statuses do.
-    op.execute(sa.text("""
-    CREATE TRIGGER trg_tina_baselines_locked BEFORE UPDATE ON tina_baselines
-    FOR EACH ROW
-    WHEN NEW.baseline_date IS NOT OLD.baseline_date
-      OR NEW.price_agreement_date IS NOT OLD.price_agreement_date
-      OR NEW.contract_id IS NOT OLD.contract_id
-      OR NEW.action_id IS NOT OLD.action_id
-    BEGIN SELECT RAISE(ABORT, 'tina baseline is locked once created'); END
-    """))
+    if op.get_bind().dialect.name == "sqlite":  # plpgsql equivalent: migration 0017
+        op.execute(sa.text("""
+        CREATE TRIGGER trg_tina_baselines_locked BEFORE UPDATE ON tina_baselines
+        FOR EACH ROW
+        WHEN NEW.baseline_date IS NOT OLD.baseline_date
+          OR NEW.price_agreement_date IS NOT OLD.price_agreement_date
+          OR NEW.contract_id IS NOT OLD.contract_id
+          OR NEW.action_id IS NOT OLD.action_id
+        BEGIN SELECT RAISE(ABORT, 'tina baseline is locked once created'); END
+        """))
 
 
 def downgrade() -> None:

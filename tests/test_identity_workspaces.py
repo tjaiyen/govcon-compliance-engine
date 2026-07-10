@@ -96,6 +96,12 @@ def test_api_middleware_attributes_requests(session_factory):
 # --- workspaces -----------------------------------------------------------------
 
 
+pytestmark_ws = pytest.mark.sqlite_only(
+    "workspaces are SQLite files by design (POSTGRES.md maps them to "
+    "database-per-workspace); the registry fixture copies the SQLite template"
+)
+
+
 @pytest.fixture()
 def registry(tmp_path, template_db):
     """A real registry whose create() copies the session-scoped template DB
@@ -126,6 +132,7 @@ def test_workspace_name_validation_blocks_traversal(tmp_path):
     assert reg.path("team-a_1").name == "team-a_1.db"
 
 
+@pytestmark_ws
 def test_workspaces_are_physically_isolated(registry):
     registry.create("alpha")
     registry.create("beta")
@@ -152,6 +159,7 @@ def test_workspaces_are_physically_isolated(registry):
     assert a_findings != b_findings
 
 
+@pytestmark_ws
 def test_unknown_and_hostile_workspace_headers(registry):
     c = TestClient(create_app(workspace_registry=registry))
     r = c.get("/api/sf1408", headers={"X-Govcon-Workspace": "ghost"})
@@ -160,6 +168,7 @@ def test_unknown_and_hostile_workspace_headers(registry):
     assert r.status_code == 422 and "invalid workspace name" in r.json()["detail"]
 
 
+@pytestmark_ws
 def test_whoami_lists_workspaces_when_routing_enabled(registry):
     registry.create("alpha")
     c = TestClient(create_app(workspace_registry=registry))

@@ -5,6 +5,7 @@ that could never fail is worse than none (roadmap Phase 6)."""
 import datetime
 from decimal import Decimal
 
+import pytest
 import sqlalchemy as sa
 
 from govcon.models import Period, Voucher
@@ -28,6 +29,13 @@ def test_clean_state_passes_all_six(session):
     ]
 
 
+pytestmark_bypass = pytest.mark.sqlite_only(
+    "seeds structurally-invalid rows via PRAGMA ignore_check_constraints, "
+    "which has no Postgres session-level equivalent; the criterion SQL "
+    "itself is dialect-neutral and runs on PG in the passing sf1408 tests"
+)
+
+
 def _bypass_checks(session, ddl: str) -> None:
     """Simulate out-of-band corruption: constraints bypassed via PRAGMA
     (exactly the scenario the self-check exists to catch)."""
@@ -36,6 +44,7 @@ def _bypass_checks(session, ddl: str) -> None:
     session.execute(sa.text("PRAGMA ignore_check_constraints = OFF"))
 
 
+@pytestmark_bypass
 def test_criterion_a_fails_on_poolless_indirect_account(session):
     seed_all(session)
     session.commit()
@@ -48,6 +57,7 @@ def test_criterion_a_fails_on_poolless_indirect_account(session):
     assert not r.passed and "6666" in r.findings[0]
 
 
+@pytestmark_bypass
 def test_criterion_b_fails_on_direct_txn_without_contract(session):
     data = seed_all(session)
     session.commit()
@@ -73,6 +83,7 @@ def test_criterion_c_fails_on_pool_with_costs_but_no_base(session):
     assert not r.passed and "allocation base" in r.findings[0]
 
 
+@pytestmark_bypass
 def test_criterion_d_fails_on_unallowable_with_pool_or_missing_citation(session):
     data = seed_all(session)
     session.commit()

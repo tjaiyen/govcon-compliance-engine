@@ -27,11 +27,6 @@ _NO_DELETE = (
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    if bind.dialect.name != "sqlite":  # pragma: no cover - SQLite-only for v1
-        raise NotImplementedError(
-            "port the no-delete trigger to plpgsql before running on Postgres"
-        )
     op.create_table(
         "regulatory_suggestions",
         sa.Column("suggestion_id", sa.Integer(), primary_key=True),
@@ -73,7 +68,9 @@ def upgrade() -> None:
             name="uq_regulatory_suggestions_doc_rule",
         ),
     )
-    op.execute(sa.text(_NO_DELETE))
+    if op.get_bind().dialect.name == "sqlite":
+        # the plpgsql equivalent is created by migration 0017
+        op.execute(sa.text(_NO_DELETE))
 
 
 def downgrade() -> None:

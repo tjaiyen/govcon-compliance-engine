@@ -115,8 +115,16 @@ def _append_only_ddl(table: str) -> list[str]:
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":  # pragma: no cover - SQLite-only for v1
-        raise NotImplementedError("port these triggers to plpgsql + REVOKE first")
+    if bind.dialect.name != "sqlite":  # pragma: no cover - PG triggers land in 0017
+        # The schema change is dialect-neutral; the SQLite trigger dance below
+        # is not (and its plpgsql equivalents are created by migration 0017).
+        with op.batch_alter_table("gl_accounts", schema=None) as batch_op:
+            batch_op.add_column(
+                sa.Column(
+                    "is_compensation", sa.Boolean(), nullable=False, server_default=sa.false()
+                )
+            )
+        return
 
     op.execute(sa.text("DROP TRIGGER IF EXISTS trg_gl_transactions_direct_needs_contract"))
     with op.batch_alter_table("gl_accounts", schema=None) as batch_op:

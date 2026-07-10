@@ -88,8 +88,8 @@ PERIOD_TRIGGERS = [
 
 def _create_period_close_triggers() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":  # pragma: no cover - SQLite-only for v1
-        raise NotImplementedError("port period-close triggers to plpgsql first")
+    if bind.dialect.name != "sqlite":  # pragma: no cover - covered on PG by 0017
+        return  # plpgsql equivalents are created by migration 0017
     for ddl in PERIOD_TRIGGERS:
         op.execute(sa.text(ddl))
 

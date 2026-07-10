@@ -263,11 +263,8 @@ APPEND_ONLY_TRIGGERS = [
 
 def _create_enforcement_triggers() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":  # pragma: no cover - SQLite-only for v1
-        raise NotImplementedError(
-            "enforcement triggers are written for SQLite; port to plpgsql + "
-            "REVOKE grants before running this migration on another backend"
-        )
+    if bind.dialect.name != "sqlite":  # pragma: no cover - covered on PG by 0017
+        return  # plpgsql equivalents are created by migration 0017
     for ddl in APPEND_ONLY_TRIGGERS:
         op.execute(sa.text(ddl))
 

@@ -74,13 +74,14 @@ def upgrade() -> None:
     # §13 / §0.1: the management-review sign-off gate at the DB layer —
     # status cannot advance to 'submitted' while reviewed_by/reviewed_at
     # are null. ORM twin: services/audit_response.advance_status().
-    op.execute(sa.text("""
-    CREATE TRIGGER trg_audit_notifications_review_gate BEFORE UPDATE ON audit_notifications
-    FOR EACH ROW
-    WHEN NEW.status = 'submitted'
-      AND (NEW.reviewed_by IS NULL OR NEW.reviewed_at IS NULL)
-    BEGIN SELECT RAISE(ABORT, 'cannot submit without a management-review sign-off'); END
-    """))
+    if op.get_bind().dialect.name == "sqlite":  # plpgsql equivalent: migration 0017
+        op.execute(sa.text("""
+        CREATE TRIGGER trg_audit_notifications_review_gate BEFORE UPDATE ON audit_notifications
+        FOR EACH ROW
+        WHEN NEW.status = 'submitted'
+          AND (NEW.reviewed_by IS NULL OR NEW.reviewed_at IS NULL)
+        BEGIN SELECT RAISE(ABORT, 'cannot submit without a management-review sign-off'); END
+        """))
 
 
 def downgrade() -> None:

@@ -36,3 +36,44 @@ jobs:
 
       - name: Tests
         run: uv run pytest -q
+
+  # Phase 4b: the SAME suite against a live Postgres 17 — exercises the
+  # plpgsql trigger layer (migration 0017), the advisory-locked audit chain,
+  # native NUMERIC storage, and the concurrency probe SQLite cannot express.
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: govcon
+          POSTGRES_PASSWORD: govcon
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U govcon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: "3.12"
+
+      - name: Sync dependencies (with postgres extra)
+        run: uv sync --extra postgres
+
+      - name: Migrations apply cleanly on Postgres (incl. 0017 triggers)
+        run: uv run alembic upgrade head
+        env:
+          GOVCON_DB_URL: postgresql+psycopg://govcon:govcon@127.0.0.1:5432/postgres
+
+      - name: Tests on Postgres
+        run: uv run pytest -q
+        env:
+          GOVCON_TEST_PG: postgresql+psycopg://govcon:govcon@127.0.0.1:5432/postgres

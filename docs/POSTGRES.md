@@ -1,20 +1,33 @@
-# Postgres port plan (Phase 4 — documented, deliberately not yet shipped)
+# Postgres support (Phase 4b — PORTED and verified live)
 
-## Status: NOT PORTED, and honestly so
+## Status: PORTED — verified against PostgreSQL 17.10
 
-The SQLAlchemy engine/session layer is dialect-clean and `pip install
-"govcon-engine[postgres]"` provides the psycopg driver, so
-`GOVCON_DB_URL=postgresql+psycopg://…` will connect — **but every migration
-that creates triggers guards with `NotImplementedError` on a non-SQLite
-dialect, on purpose.** The trigger layer is half of this engine's enforcement
-thesis (typed ORM error + DB-level `RAISE(ABORT)`); shipping a plpgsql
-translation that has never executed against a live Postgres would be
-verification theater. This document is the executable plan for the day a
-Postgres instance is available to verify against (locally: `brew install
-postgresql@17` or Docker, then `uv run pytest` with `GOVCON_DB_URL` pointed
-at it).
+This document began as the executable port plan written when no Postgres was
+available to verify against; the port has since been executed and verified
+live (2026-07-09, PostgreSQL 17.10 via Homebrew, plus a `postgres:17` service
+job in CI running the full suite). What shipped:
 
-## 1. The 26 triggers to port (live census, migration head = 0016)
+* **Migration 0017** creates the complete plpgsql enforcement layer (all 26
+  triggers, census below) on Postgres; SQLite keeps its original trigger DDL
+  from 0001/0006/0013/0015/0016 (now dialect-branched, never raising).
+  Trigger functions raise with **ERRCODE 23000** so psycopg surfaces the
+  same `IntegrityError` class SQLite's `RAISE(ABORT)` does — every
+  business-rule test asserts identical class + message on both backends.
+* **Advisory lock** (`AUDIT_CHAIN_LOCK_KEY`, transaction-scoped) serializes
+  the audit chain's read-last-hash/insert pair; proven by a two-writer
+  concurrency probe (tests/test_postgres_concurrency.py) that SQLite cannot
+  express. The gapless-trail_id belt is SQLite-only (PG sequences skip on
+  rollback); on PG, integrity = hash linkage + the no-delete trigger.
+* **Dual-backend test harness**: `GOVCON_TEST_PG=<admin url> uv run pytest`
+  clones a migrated template database per test (`CREATE DATABASE …
+  TEMPLATE`). SQLite-by-design probes (PRAGMA bypass mechanics, workspace
+  files) carry a reported `sqlite_only` marker — skipped, never silent.
+
+Run it locally: `brew install postgresql@17`, `initdb` + `pg_ctl start`,
+then `GOVCON_TEST_PG=postgresql+psycopg://you@127.0.0.1:5432/postgres uv run
+pytest`.
+
+## 1. The 26 triggers (live census; ported in migration 0017)
 
 Every trigger is `BEFORE <op> ON <table> … SELECT RAISE(ABORT, 'msg')` on
 SQLite. The plpgsql shape is mechanical — one trigger function per rule,
@@ -45,7 +58,7 @@ gaps on Postgres (weaken the check to hash-linkage only) or allocate ids
 inside the same advisory-locked section. Decide at port time; both options
 are honest, silent divergence is not.
 
-## 3. Verification bar (same discipline as every phase)
+## 3. Verification bar (met — see CI job `test-postgres`)
 
 * Full `uv run pytest` suite green with `GOVCON_DB_URL` on Postgres — the
   business-rule tests ARE the trigger probes (tamper tests, closed-period
