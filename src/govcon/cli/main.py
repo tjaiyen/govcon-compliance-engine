@@ -510,17 +510,26 @@ def serve(
             f"workspace routing ON — X-Govcon-Workspace header selects one of: "
             f"{registry.list() or '(none yet)'}"
         )
-    # AI assistant: enabled only if the ai extra + ANTHROPIC_API_KEY are present
-    # AND data mode is synthetic (fail-closed). Absent → the AI endpoints report
-    # unavailable and the workbench runs unchanged.
-    from govcon.ai import default_client_or_none
-    from govcon.ai.gate import is_synthetic
+    # AI assistant. synthetic mode → the cloud client (if the ai extra + key are
+    # present). real mode → a LOCAL model (Ollama) so real data never leaves the
+    # machine; the gate refuses real data to any non-local client. Absent → the
+    # AI endpoints report unavailable and the workbench runs unchanged.
+    from govcon.ai.client import build_llm_client
+    from govcon.ai.gate import is_real
 
-    llm_client = default_client_or_none() if is_synthetic() else None
-    typer.echo(
-        f"AI assistant: {'ON (synthetic-data only)' if llm_client else 'off (no key / non-synthetic mode)'}"
-    )
-    typer.echo(f"GovCon workbench (synthetic data) → http://{host}:{port}")
+    llm_client = build_llm_client()
+    if not llm_client:
+        typer.echo("AI assistant: off (no key / unconfigured mode)")
+    elif is_real():
+        typer.secho(
+            "AI assistant: ON — REAL-DATA MODE (LOCAL model only; advisory, NOT "
+            "certified, NOT for filing). Real data never leaves this machine.",
+            fg=typer.colors.YELLOW,
+        )
+    else:
+        typer.echo("AI assistant: ON (synthetic-data only)")
+    banner = "REAL DATA — advisory, local-only" if is_real() else "synthetic data"
+    typer.echo(f"GovCon workbench ({banner}) → http://{host}:{port}")
     uvicorn.run(
         create_app(workspace_registry=registry, llm_client=llm_client),
         host=host,

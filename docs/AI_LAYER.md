@@ -121,9 +121,19 @@ events, and the B53 no-write proofs — never on prose. Browser tests (`tests/fr
 `tests/ai/test_ai_live_smoke.py` hits the real API once (skipped without a key) and asserts
 only that a determination came back grounded.
 
-## Future — real-data mode
+## Real-data mode — local-only (shipped)
 
-Real data would route to a **local model** (Ollama) behind the same `LLMClient` Protocol so
-nothing leaves the machine; the gate flips from "refuse" to "route local." v1 is
-Claude-API-synthetic-only; the Protocol is the drop-in seam. (Real-data mode remains behind
-the Phase-5 liability line; per-user auth is shipped but real-data/RLS/certification are not.)
+`GOVCON_DATA_MODE=real` routes to a **local model (Ollama)** behind the same `LLMClient`
+Protocol (`LocalClient`, `is_local = True`), so real contract data is processed on the
+machine and **never leaves it**. The gate (`assert_data_mode`) enforces the pairing: real
+mode is allowed ONLY through a local client and **refuses real data to any cloud/absent
+client** — so a misconfiguration fails closed instead of leaking data to the API. Configure
+`GOVCON_OLLAMA_URL` / `GOVCON_OLLAMA_MODEL` (needs Ollama running with a tool-capable model).
+
+**Authentication and real-data stay separate switches**, and the tool is advisory in every
+combination: real-data mode is **NOT** a certification, **NOT** a system-of-record, and
+**NOT** for regulatory filing — the workbench shows a loud red REAL-DATA banner, `/api/about`
+states it, and the determination engine stays deterministic + grounded + audited. Still
+excluded (the Phase-5 liability line): multi-tenant RLS, certification, and any system-of-
+record posture. The `LLMClient` Protocol is the seam that made the cloud→local switch a
+drop-in, with no change to the loop, grounding, or the four patterns.

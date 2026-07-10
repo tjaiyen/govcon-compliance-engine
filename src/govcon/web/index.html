@@ -21,6 +21,8 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px 80px; }
 .mono { font-family: 'IBM Plex Mono', monospace; }
 .banner { background: color-mix(in srgb, var(--accent) 12%, #0a1f33); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.banner.real { background: #4a1010; border-bottom-color: #d9534f; }
+.banner.real b { color: #ffd0cc; }
 .banner .wrap { padding-top: 10px; padding-bottom: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .banner b { color: var(--accent); font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; }
 .banner span { color: #bcd0e0; font-size: 0.85rem; }
@@ -116,7 +118,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 </head>
 <body>
 <a class="skip" href="#main">Skip to the workbench</a>
-<div class="banner"><div class="wrap"><b>Synthetic data</b><span>Advisory decision-support &amp; training tool — <strong>not</strong> a certified accounting system. <a href="/api/about" target="_blank" rel="noopener">Read the limitations &#8599;</a></span></div></div>
+<div class="banner" id="banner"><div class="wrap"><b id="banner-mode">Synthetic data</b><span>Advisory decision-support &amp; training tool — <strong>not</strong> a certified accounting system. <a href="/api/about" target="_blank" rel="noopener">Read the limitations &#8599;</a></span></div></div>
 
 <main id="main" class="wrap">
   <header class="top">
@@ -275,6 +277,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
+  // Reflect the live data mode in the top banner: real-data mode gets a loud red
+  // banner so the user always sees they are on REAL (local-only) data, not synthetic.
+  fetch("/health").then(function (r) { return r.json(); }).then(function (h) {
+    if (h && h.data_mode === "real") {
+      var b = $("banner"); if (b) b.classList.add("real");
+      var m = $("banner-mode"); if (m) m.textContent = "REAL DATA — local model, advisory only";
+    }
+  }).catch(function () {});
   function esc(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
   // href sink for EXTERNAL (fetched) URLs: attribute-escaping alone can't stop
   // a javascript:/data: scheme, so allow only http(s) and fall back to "#".

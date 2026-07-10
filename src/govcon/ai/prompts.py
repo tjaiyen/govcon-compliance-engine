@@ -15,8 +15,8 @@ recall regulatory values from memory — call a tool and quote what it returns.
 If a tool returns an error or reports no value in force, say so plainly ("this is
 an open question, verify the primary source") — never invent a value. Surface the
 tool's `caveats` verbatim; a non-final threshold is operative but not settled law.
-This is advisory decision-support on SYNTHETIC data, not a certified accounting
-system and not legal advice."""
+This is advisory decision-support, not a certified accounting system and not
+legal advice (see the limitations below for the current data mode)."""
 
 
 def _with_limits(body: str) -> str:
