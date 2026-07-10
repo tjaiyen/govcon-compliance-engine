@@ -15,7 +15,7 @@ import os
 import threading
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -46,25 +46,38 @@ class RateLimiter:
     """A tiny in-process sliding-window limiter keyed by client IP + scope.
     Bounds AI cost-DoS together with the per-request USD ceiling. Not a
     distributed limiter — one process, best-effort; a real deployment would
-    put a proper limiter at the edge."""
+    put a proper limiter at the edge.
+
+    Memory is bounded: keys are held in an LRU-capped OrderedDict, so an attacker
+    rotating source IPs can't grow ``_hits`` without limit (the limiter is not
+    itself a slow memory-DoS surface)."""
+
+    #: Cap on distinct keys retained; the least-recently-seen are evicted.
+    _MAX_KEYS = 8192
 
     def __init__(self, limit: int, window_s: float):
         self.limit = limit
         self.window_s = window_s
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._hits: OrderedDict[str, deque[float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def allow(self, key: str, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
         with self._lock:
-            dq = self._hits[key]
+            dq = self._hits.get(key)
+            if dq is None:
+                dq = deque()
+                self._hits[key] = dq
+            self._hits.move_to_end(key)  # most-recently-seen
             cutoff = now - self.window_s
             while dq and dq[0] < cutoff:
                 dq.popleft()
-            if len(dq) >= self.limit:
-                return False
-            dq.append(now)
-            return True
+            allowed = len(dq) < self.limit
+            if allowed:
+                dq.append(now)
+            while len(self._hits) > self._MAX_KEYS:  # bound memory (LRU evict)
+                self._hits.popitem(last=False)
+            return allowed
 
 
 def _client_key(request: Request) -> str:

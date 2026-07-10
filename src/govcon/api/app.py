@@ -140,6 +140,13 @@ def _narrative_banner() -> str:
     return f"{kind} — DRAFT NARRATIVE FOR INTERNAL REVIEW, NOT FOR FILING OR CERTIFICATION"
 
 
+def _data_mode_label() -> str:
+    """A short mode-aware data label ('Synthetic data.' / 'Real data (local model).')."""
+    from govcon.ai.gate import is_real
+
+    return "Real data (local model)." if is_real() else "Synthetic data."
+
+
 def _sse(evt: dict) -> str:
     """Pack one event as an SSE ``data:`` frame (single unnamed event channel)."""
     return "data: " + json.dumps(evt) + "\n\n"
@@ -258,7 +265,10 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             workspace_factories[name] = built
             if len(workspace_factories) > _MAX_CACHED_WORKSPACES:
                 _, evicted = workspace_factories.popitem(last=False)
-                evicted.kw["bind"].dispose()  # close the evicted pool
+                # Close the evicted pool. Safe even if an in-flight request still
+                # holds this factory: engine.dispose() only closes IDLE pooled
+                # connections; a subsequent checkout transparently re-opens.
+                evicted.kw["bind"].dispose()
             return built
 
     def get_session(request: Request) -> Iterator[Session]:
@@ -511,7 +521,7 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 "cost": result.cost.as_dict(),
                 "notice": (
                     "DRAFT only — a proposal for a human-reviewed migration. Nothing "
-                    "was applied, saved, or put in force. Synthetic data."
+                    "was applied, saved, or put in force. " + _data_mode_label()
                 ),
             }
 

@@ -23,7 +23,10 @@ def _with_limits(body: str) -> str:
     return f"{body}\n\nThe tool's own stated limitations (state these if asked):\n{explain_limitations()}"
 
 
-ASK_SYSTEM = _with_limits(
+#: Pattern bodies are constants; _with_limits() is applied PER CALL in
+#: system_for() so the appended limitations reflect the LIVE data mode + auth
+#: posture (not whatever was in force at module import). Tutor already did this.
+_ASK_BODY = (
     INTERFACE_CLAUSE
     + "\n\nAnswer the user's GovCon compliance question. Translate their plain-English "
     "question into the right tool call(s), then explain the engine's determination in "
@@ -74,7 +77,7 @@ def _tutor_system(persona: str) -> str:
 #: Pattern 3 (rule-authoring) — the AI DRAFTS a decision-table rule from a
 #: described regulatory change. The B53 hard line is baked into the prompt: it
 #: drafts + validates only, it can apply nothing, and it must say so.
-DRAFT_RULE_SYSTEM = _with_limits(
+_DRAFT_RULE_BODY = (
     INTERFACE_CLAUSE
     + "\n\nThe user describes a regulatory change. Draft a candidate decision-table "
     "rule for a HUMAN to review and migrate — you are NOT applying anything. Steps: "
@@ -95,7 +98,7 @@ DRAFT_RULE_SYSTEM = _with_limits(
 #: Pattern 4 (narrative drafter) — a memo grounded ENTIRELY in computed numbers.
 #: Strictest grounding: every figure must trace to a tool result, and the whole
 #: draft is a SYNTHETIC, advisory memo — never a filing.
-NARRATIVE_SYSTEM = _with_limits(
+_NARRATIVE_BODY = (
     INTERFACE_CLAUSE
     + "\n\nDraft a short, professional memo/narrative that explains the engine's "
     "determination for the described situation. First call the right tool(s) to get "
@@ -112,8 +115,9 @@ NARRATIVE_SYSTEM = _with_limits(
 def system_for(pattern: str, *, persona: str | None = None) -> str:
     if pattern == "tutor":
         return _tutor_system(persona or DEFAULT_TUTOR_PERSONA)
-    return {
-        "ask": ASK_SYSTEM,
-        "draft_rule": DRAFT_RULE_SYSTEM,
-        "draft_narrative": NARRATIVE_SYSTEM,
-    }.get(pattern, ASK_SYSTEM)
+    body = {
+        "ask": _ASK_BODY,
+        "draft_rule": _DRAFT_RULE_BODY,
+        "draft_narrative": _NARRATIVE_BODY,
+    }.get(pattern, _ASK_BODY)
+    return _with_limits(body)  # per-call: reflects the live data mode + auth

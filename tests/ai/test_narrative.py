@@ -5,7 +5,7 @@ and the draft is always a SYNTHETIC, advisory artifact (never a filing).
 
 from fastapi.testclient import TestClient
 
-from govcon.ai.prompts import NARRATIVE_SYSTEM
+from govcon.ai.prompts import system_for
 from govcon.api import create_app
 from tests.ai.conftest import final_turn, tool_turn
 
@@ -15,8 +15,10 @@ def _client(session_factory, fake):
 
 
 def test_narrative_system_prompt_states_grounding_and_synthetic():
-    assert "INTERFACE over a deterministic" in NARRATIVE_SYSTEM
-    assert "SYNTHETIC" in NARRATIVE_SYSTEM and "memo" in NARRATIVE_SYSTEM
+    # built per-call; default (synthetic) mode → the limitations say SYNTHETIC
+    sys = system_for("draft_narrative")
+    assert "INTERFACE over a deterministic" in sys
+    assert "SYNTHETIC" in sys and "memo" in sys
 
 
 def test_narrative_grounds_memo_in_determination_with_banner(
