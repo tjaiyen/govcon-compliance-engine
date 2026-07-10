@@ -184,6 +184,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <h2>What still needs re-verifying?</h2>
     <p class="sub">Rules that aren't settled final regulation stay on a standing watch list, with their status.</p>
     <div id="r-watch" aria-live="polite"><p class="muted">Loading…</p></div>
+    <div class="why" style="margin-top:18px">Regulation-watch suggestions</div>
+    <div id="r-suggest" aria-live="polite"><p class="muted">Loading…</p></div>
+    <p class="hint">Found by the Federal Register watcher (<span class="mono">govcon watch scan</span>).
+    A human reviews every suggestion; applying a change is always a verified migration — never automatic.</p>
   </section>
 
   <!-- ============ glossary (Phase 2) ============ -->
@@ -429,6 +433,19 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       return '<div class="watch-item"><span class="kind">[' + esc(i.kind) + "]</span> " + (i.due ? '<span class="due">DUE</span> ' : "") + esc(i.description) + "</div>";
     }).join("");
   }).catch(function () { $("r-watch").innerHTML = '<p class="muted">Could not load the watch list.</p>'; });
+
+  get("/api/suggestions").then(function (b) {
+    var host = $("r-suggest");
+    if (!b.suggestions.length) { host.innerHTML = '<p class="muted">No suggestions recorded — run <span class="mono">govcon watch scan</span>.</p>'; return; }
+    host.innerHTML = b.suggestions.map(function (sg) {
+      var mark = sg.strong_match ? '<span class="tag warn">strong</span>' : '<span class="tag info">weak</span>';
+      var eff = sg.effective_on ? " &middot; effective " + esc(sg.effective_on) : "";
+      var link = sg.url ? ' <a href="' + esc(sg.url) + '" target="_blank" rel="noopener">read &#8599;</a>' : "";
+      return '<div class="watch-item">' + mark + ' <span class="kind">[' + esc(sg.status) + "]</span> " +
+        esc(sg.watch_rule) + " &mdash; " + esc(sg.doc_type || "Document") + " " + esc(sg.document_number) +
+        " (" + esc(sg.publication_date || "n.d.") + ")" + eff + "<br>" + esc(sg.title) + link + "</div>";
+    }).join("");
+  }).catch(function () { $("r-suggest").innerHTML = '<p class="muted">Could not load suggestions.</p>'; });
 
   // ---- persona switch re-renders everything already on screen ----
   function rerenderAll() {

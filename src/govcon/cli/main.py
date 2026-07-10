@@ -22,9 +22,14 @@ rules_app = typer.Typer(
     help="Decision-table (rules-as-data) explorer — read-only; rule changes "
     "land as new table versions via migrations, never through the CLI."
 )
+watch_app = typer.Typer(
+    help="Regulation watch — a Federal Register suggester with a mandatory "
+    "human review step; it NEVER applies a change itself."
+)
 app.add_typer(db_app, name="db")
 app.add_typer(audit_app, name="audit")
 app.add_typer(rules_app, name="rules")
+app.add_typer(watch_app, name="watch")
 
 
 @app.command()
@@ -261,6 +266,110 @@ def rules_show(
                 typer.echo(
                     f"     STATUS:  {r.status.value} — {r.source_citation}"
                 )
+
+
+@watch_app.command("scan")
+def watch_scan(
+    since: str = typer.Option(
+        None, help="Fetch documents published on/after this ISO date "
+        "(default: 90 days back)."
+    ),
+) -> None:
+    """Scan the Federal Register for the engine's watch targets and record
+    NEW suggestions for human review. Suggest-only: applying a change is
+    always a verified migration, never this command."""
+    import datetime
+
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.services.regulation_watch import scan
+
+    since_date = datetime.date.fromisoformat(since) if since else None
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        result = scan(session, since=since_date)
+        session.commit()
+    typer.echo(
+        f"scanned {len(result.targets)} watch target(s) since "
+        f"{result.since.isoformat()}: {len(result.new_suggestions)} new, "
+        f"{result.already_known} already known"
+    )
+    for u in result.unavailable:
+        typer.echo(f"[unavailable] {u['watch_rule']}: {u['error']}", err=True)
+    for t in result.truncated:
+        typer.echo(
+            f"[truncated] {t['watch_rule']}: {t['total']} matches, first "
+            f"{t['recorded']} recorded — narrow with --since",
+            err=True,
+        )
+    for name in result.skipped_unmapped:
+        typer.echo(f"[unmapped] {name}: no search term configured — add one "
+                   "to WATCH_TERMS", err=True)
+    typer.echo("suggestions are search results, not determinations — review "
+               "with `govcon watch list` / `govcon watch review`")
+
+
+@watch_app.command("list")
+def watch_list(
+    all: bool = typer.Option(False, "--all", help="Include reviewed/dismissed."),
+) -> None:
+    """List regulation-watch suggestions (default: NEW only)."""
+    import sqlalchemy as sa
+
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.models import RegulatorySuggestion
+    from govcon.models.enums import SuggestionStatus
+
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        stmt = sa.select(RegulatorySuggestion).order_by(
+            RegulatorySuggestion.strong_match.desc(),
+            RegulatorySuggestion.publication_date.desc(),
+        )
+        if not all:
+            stmt = stmt.where(RegulatorySuggestion.status == SuggestionStatus.NEW)
+        rows = session.execute(stmt).scalars().all()
+        if not rows:
+            typer.echo("no suggestions" + ("" if all else " with status=new"))
+            return
+        for r in rows:
+            mark = "STRONG" if r.strong_match else "weak  "
+            eff = f" effective {r.effective_on.isoformat()}" if r.effective_on else ""
+            typer.echo(
+                f"#{r.suggestion_id} [{r.status.value}] [{mark}] "
+                f"{r.watch_rule} — {r.doc_type or 'Document'} "
+                f"{r.document_number} ({r.publication_date}){eff}"
+            )
+            typer.echo(f"    {r.title}")
+            if r.url:
+                typer.echo(f"    {r.url}")
+
+
+@watch_app.command("review")
+def watch_review(
+    suggestion_id: int,
+    reviewed: bool = typer.Option(False, "--reviewed", help="Mark verified-relevant."),
+    dismiss: bool = typer.Option(False, "--dismiss", help="Mark not relevant."),
+    note: str = typer.Option(None, help="Why — recorded on the row."),
+) -> None:
+    """Record the human verdict on a suggestion. This changes ONLY the
+    suggestion row — applying a regulatory change is always a migration."""
+    from govcon.db.engine import make_engine, make_session_factory
+    from govcon.models.enums import SuggestionStatus
+    from govcon.services.regulation_watch import review_suggestion
+
+    if reviewed == dismiss:
+        typer.echo("choose exactly one of --reviewed / --dismiss", err=True)
+        raise typer.Exit(code=2)
+    status = SuggestionStatus.REVIEWED if reviewed else SuggestionStatus.DISMISSED
+    factory = make_session_factory(make_engine())
+    with factory() as session:
+        try:
+            row = review_suggestion(session, suggestion_id, status=status, note=note)
+        except LookupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from None
+        session.commit()
+        typer.echo(f"#{row.suggestion_id} -> {row.status.value}")
 
 
 @db_app.command("upgrade")

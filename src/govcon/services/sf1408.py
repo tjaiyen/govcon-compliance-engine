@@ -210,6 +210,11 @@ regulatory reference §4):
    criteria. A secondary source claims 14; that conflict is documented,
    unresolved, and must be settled against DCAA's actual current SF 1408
    checklist before extending this suite.
+6. REGULATION WATCH IS A SUGGESTER: the Federal Register watcher records
+   search results as suggestions for a HUMAN to verify — it never changes
+   a threshold or rule itself (parsing regulation is fragile; every change
+   lands as a reviewed migration), and a suggestion is not a legal
+   conclusion.
 """
 
 
