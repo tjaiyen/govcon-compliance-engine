@@ -284,6 +284,11 @@ ASK_TOOLS = [
     "explain_limitations",
 ]
 
+#: Pattern 2 (AI tutor): the ask tools plus the scenario library, so the tutor
+#: can point a learner at a hands-on example. Still read-only, still no tool that
+#: computes a determination the AI could fabricate.
+TUTOR_TOOLS = [*ASK_TOOLS, "list_scenarios"]
+
 
 def tool_definitions(names: list[str]) -> list[dict]:
     return [TOOLS[n].definition() for n in names]

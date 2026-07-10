@@ -283,6 +283,20 @@ def test_scope_gate_403_on_ask_only(session_factory, monkeypatch):
                   headers=_bearer(with_scope)).status_code == 200
 
 
+def test_scope_gate_also_covers_tutor(session_factory, monkeypatch):
+    # /api/tutor is an expensive AI route too — same required-scope gate as ask
+    _auth_on(monkeypatch, required_scope="ask:run")
+    monkeypatch.setenv("GOVCON_DATA_MODE", "synthetic")
+    from tests.ai.conftest import FakeLLMClient, final_turn
+
+    fake = FakeLLMClient([final_turn("ok") for _ in range(2)])
+    c = TestClient(create_app(session_factory=session_factory, llm_client=fake))
+    assert c.post("/api/tutor", json={"question": "hi"},
+                  headers=_bearer(idp.mint_hs256(SECRET))).status_code == 403
+    assert c.post("/api/tutor", json={"question": "hi"},
+                  headers=_bearer(idp.mint_hs256(SECRET, scope="ask:run"))).status_code == 200
+
+
 def test_auth_is_independent_of_synthetic_gate(session_factory, monkeypatch):
     """auth ≠ real-data: a valid token does NOT flip the tool into real-data
     mode — the synthetic gate still fails closed on GOVCON_DATA_MODE=real."""

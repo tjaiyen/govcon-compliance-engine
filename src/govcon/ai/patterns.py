@@ -1,4 +1,6 @@
-"""Thin per-pattern wrappers over the shared loop. Phase A ships ``ask``."""
+"""Thin per-pattern wrappers over the shared loop. ``ask`` (Pattern 1) and
+``tutor`` (Pattern 2) differ ONLY by system prompt + tool subset — the loop,
+grounding, gate, and withhold-on-fail discipline are identical."""
 
 from __future__ import annotations
 
@@ -10,8 +12,8 @@ from govcon.ai.client import LLMClient
 from govcon.ai.cost import CostLog
 from govcon.ai.gate import assert_synthetic
 from govcon.ai.loop import AITurnResult, run_conversation
-from govcon.ai.prompts import system_for
-from govcon.ai.registry import ASK_TOOLS
+from govcon.ai.prompts import DEFAULT_TUTOR_PERSONA, system_for
+from govcon.ai.registry import ASK_TOOLS, TUTOR_TOOLS
 
 #: Determination-only fallback prose when grounding fails — never ship
 #: unverified numbers; point the user at the structured determination.
@@ -40,6 +42,34 @@ def ask(
         session,
         system=system_for("ask"),
         tool_names=ASK_TOOLS,
+        user_text=question,
+        cost_log=cost,
+    )
+    if result.grounding is not None and not result.grounding.verified:
+        result.prose = _UNVERIFIED_NOTICE
+    return result
+
+
+def tutor(
+    client: LLMClient,
+    session: Session,
+    question: str,
+    *,
+    persona: str = DEFAULT_TUTOR_PERSONA,
+    actor: str = "unknown",
+    workspace: str = "default",
+    max_usd: Decimal | None = None,
+) -> AITurnResult:
+    """AI tutor (Pattern 2): same grounded loop as ``ask``, taught at the depth
+    the ``persona`` calls for. Grounding still governs — an unverified number is
+    withheld and the authoritative determination stands."""
+    assert_synthetic()  # kernel-level gate (defence in depth vs the HTTP gate)
+    cost = CostLog(pattern="tutor", actor=actor, workspace=workspace, max_usd=max_usd)
+    result = run_conversation(
+        client,
+        session,
+        system=system_for("tutor", persona=persona),
+        tool_names=TUTOR_TOOLS,
         user_text=question,
         cost_log=cost,
     )

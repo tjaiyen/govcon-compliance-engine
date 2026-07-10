@@ -10,6 +10,7 @@ completely untouched by the browsing/what-if UI.
 from __future__ import annotations
 
 import datetime
+import enum
 import os
 import threading
 from collections import OrderedDict
@@ -86,6 +87,22 @@ def _money(raw: str) -> Decimal:
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
+
+
+class TutorPersona(str, enum.Enum):
+    """The five teaching depths — same data, different framing (mirrors the
+    guided UI's persona bar). An unknown value → 422 (Pydantic validation)."""
+
+    NEWCOMER = "newcomer"
+    ANALYST = "analyst"
+    CONTROLLER = "controller"
+    EXECUTIVE = "executive"
+    AUDITOR = "auditor"
+
+
+class TutorRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    persona: TutorPersona = TutorPersona.NEWCOMER
 
 
 def create_app(session_factory=None, workspace_registry=None, llm_client=None) -> FastAPI:
@@ -213,46 +230,32 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         }
 
     # ------------------------------------------------------------ AI assistant
-    @app.post("/api/ask")
-    def ask(
-        req: AskRequest, request: Request, session: Session = Depends(get_session)
-    ) -> dict:
-        """Conversational query (Pattern 1): a plain-English question → the AI
-        calls the deterministic engine as tools → a grounded answer that ALWAYS
-        returns the authoritative determination beside the prose. The AI never
-        makes the determination; unverified prose is withheld."""
-        if llm_client is None:
-            return {"ai_available": False, "reason": "AI is not configured on this server"}
+    def _serve_ai(request: Request, run, *, extra: dict | None = None) -> dict:
+        """Shared plumbing for every AI pattern endpoint: rate limit → synthetic
+        gate → per-request USD ceiling → run → grounded envelope. ``run`` is a
+        callable ``(max_usd) -> AITurnResult`` capturing the pattern + inputs, so
+        /api/ask and /api/tutor share one loop of guardrails (no drift)."""
         from fastapi import HTTPException as _HTTPException
 
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
         from govcon.ai.gate import assert_synthetic
-        from govcon.ai.patterns import ask as run_ask
         from govcon.api.hardening import _client_key
 
         if not ask_limiter.allow(_client_key(request)):
             raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
-
         try:
             assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
         except SyntheticGateError as exc:
             return {"ai_available": False, "reason": str(exc)}
-        # Hard per-request USD ceiling so a single /api/ask cannot drive
-        # unbounded Claude spend (GOVCON_AI_MAX_USD, default $0.50). Combined
-        # with the rate limiter below, this bounds AI cost-DoS.
+        # Hard per-request USD ceiling so a single AI call cannot drive unbounded
+        # Claude spend (GOVCON_AI_MAX_USD, default $0.50). With the rate limiter
+        # above, this bounds AI cost-DoS.
         try:
             max_usd = Decimal(os.environ.get("GOVCON_AI_MAX_USD", "0.50"))
         except (InvalidOperation, TypeError):
             max_usd = Decimal("0.50")
         try:
-            result = run_ask(
-                llm_client,
-                session,
-                req.question,
-                actor=current_actor(),
-                workspace=request.headers.get("x-govcon-workspace") or "default",
-                max_usd=max_usd,
-            )
+            result = run(max_usd)
         except CostCeilingError as exc:
             return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
         return {
@@ -268,7 +271,58 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 "Advisory rendering over synthetic data. The structured "
                 "determination above is the authoritative result."
             ),
+            **(extra or {}),
         }
+
+    @app.post("/api/ask")
+    def ask(
+        req: AskRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """Conversational query (Pattern 1): a plain-English question → the AI
+        calls the deterministic engine as tools → a grounded answer that ALWAYS
+        returns the authoritative determination beside the prose. The AI never
+        makes the determination; unverified prose is withheld."""
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import ask as run_ask
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_ask(
+                llm_client,
+                session,
+                req.question,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+        )
+
+    @app.post("/api/tutor")
+    def tutor(
+        req: TutorRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """AI tutor (Pattern 2): the same grounded engine-as-tools loop as
+        /api/ask, but taught at the requested ``persona``'s depth. Same
+        authoritative-determination-beside-prose contract; same withhold-on-
+        ungrounded discipline. Teaching depth never changes the determination."""
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import tutor as run_tutor
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_tutor(
+                llm_client,
+                session,
+                req.question,
+                persona=req.persona.value,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+            extra={"persona": req.persona.value},
+        )
 
     # ---------------------------------------------------------------- the UI
     @app.get("/", response_class=HTMLResponse)
