@@ -5,6 +5,7 @@ from govcon.models.audit_trail import AuditTrail
 from govcon.models.billing import ICESchedule, PayrollRegister, Voucher
 from govcon.models.claims import EichleayClaim, REACDAAction, REACDALineItem
 from govcon.models.contracts import CONTRACT_FROZEN_COLUMNS, Contract, ContractAction
+from govcon.models.decision_tables import DecisionRule, DecisionTable
 from govcon.models.exceptions_ref import ContractClauseException, GSAPerDiemRate
 from govcon.models.ledger import GLAccount, GLTransaction, JCLEntry
 from govcon.models.monitoring import (
@@ -38,6 +39,8 @@ __all__ = [
     "ContractClauseException",
     "CostAccountingPractice",
     "CostVariance",
+    "DecisionRule",
+    "DecisionTable",
     "EichleayClaim",
     "ForwardPricingRateAgreement",
     "GSAPerDiemRate",
