@@ -68,7 +68,7 @@ def _rebuild_status_check(old_values: Sequence[str], new_values: Sequence[str]) 
         values = ", ".join(f"'{v}'" for v in new_values)
         op.execute(sa.text(
             "ALTER TABLE regulatory_thresholds "
-            "DROP CONSTRAINT ck_regulatory_thresholds_threshold_status"
+            "DROP CONSTRAINT IF EXISTS ck_regulatory_thresholds_threshold_status"
         ))
         op.execute(sa.text(
             "ALTER TABLE regulatory_thresholds "

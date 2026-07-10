@@ -141,13 +141,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for ddl in IMMUTABILITY_TRIGGERS:
-        name = ddl.split("CREATE TRIGGER ")[1].split(" ")[0]
-        op.execute(sa.text(f"DROP TRIGGER IF EXISTS {name}"))
-    for table in APPEND_ONLY_TABLES:
-        op.execute(sa.text(f"DROP TRIGGER IF EXISTS trg_{table}_no_update"))
-        op.execute(sa.text(f"DROP TRIGGER IF EXISTS trg_{table}_no_delete"))
-    op.execute(sa.text("DROP TRIGGER IF EXISTS trg_gl_transactions_direct_needs_contract"))
+    # The SQLite trigger dance (drop/recreate RAISE(ABORT) DDL) is SQLite-only;
+    # on Postgres the equivalents were created by 0017 and are dropped by
+    # 0017's own downgrade, so here only the neutral column drop runs.
+    sqlite = op.get_bind().dialect.name == "sqlite"
+    if sqlite:
+        for ddl in IMMUTABILITY_TRIGGERS:
+            name = ddl.split("CREATE TRIGGER ")[1].split(" ")[0]
+            op.execute(sa.text(f"DROP TRIGGER IF EXISTS {name}"))
+        for table in APPEND_ONLY_TABLES:
+            op.execute(sa.text(f"DROP TRIGGER IF EXISTS trg_{table}_no_update"))
+            op.execute(sa.text(f"DROP TRIGGER IF EXISTS trg_{table}_no_delete"))
+        op.execute(sa.text("DROP TRIGGER IF EXISTS trg_gl_transactions_direct_needs_contract"))
     with op.batch_alter_table("gl_accounts", schema=None) as batch_op:
         batch_op.drop_column("is_compensation")
-    op.execute(sa.text(DIRECT_NEEDS_CONTRACT_TRIGGER))
+    if sqlite:
+        op.execute(sa.text(DIRECT_NEEDS_CONTRACT_TRIGGER))

@@ -90,7 +90,24 @@ def test_api_middleware_attributes_requests(session_factory):
     body = c.get("/api/whoami", headers={"X-Govcon-User": "tj"}).json()
     assert body["actor"] == "web:tj"
     assert body["workspace"] == "default"  # no registry configured
-    assert body["workspaces"] is None
+    assert body["routing_enabled"] is False
+
+
+def test_actor_header_is_sanitized_before_the_audit_trail(session_factory):
+    """An untrusted X-Govcon-User must not inject control chars, delimiter
+    confusion, or unbounded length into the immutable audit trail."""
+    c = TestClient(create_app(session_factory=session_factory))
+    # delimiter/space confusion collapses to safe chars
+    a = c.get("/api/whoami", headers={"X-Govcon-User": "admin web:root"}).json()["actor"]
+    assert a == "web:admin_web_root" and " " not in a
+    # tab / control chars collapse
+    b = c.get("/api/whoami", headers={"X-Govcon-User": "a\tb\nc"}).json()["actor"]
+    assert b == "web:a_b_c"
+    # length is capped (64-char label max)
+    long = c.get("/api/whoami", headers={"X-Govcon-User": "x" * 500}).json()["actor"]
+    assert len(long) <= len("web:") + 64
+    # whitespace-only falls back to anonymous
+    assert c.get("/api/whoami", headers={"X-Govcon-User": "   "}).json()["actor"] == "web:anonymous"
 
 
 # --- workspaces -----------------------------------------------------------------
@@ -129,6 +146,14 @@ def test_workspace_name_validation_blocks_traversal(tmp_path):
     for hostile in ("../evil", "a/b", "..", "A B", "x" * 41, "", ".hidden"):
         with pytest.raises(ValueError, match="invalid workspace name"):
             reg.path(hostile)
+    # Windows reserved device names (nul.db etc. cause silent data loss there)
+    for reserved in ("con", "nul", "aux", "prn", "com1", "lpt9"):
+        with pytest.raises(ValueError, match="reserved device name"):
+            reg.path(reserved)
+    # uppercase variants are already rejected by the lowercase charset rule
+    for upper in ("NUL", "Con"):
+        with pytest.raises(ValueError, match="invalid workspace name"):
+            reg.path(upper)
     assert reg.path("team-a_1").name == "team-a_1.db"
 
 
@@ -152,11 +177,12 @@ def test_workspaces_are_physically_isolated(registry):
 
     a = c.get("/api/sf1408", headers={"X-Govcon-Workspace": "alpha"}).json()
     b = c.get("/api/sf1408", headers={"X-Govcon-Workspace": "beta"}).json()
-    a_findings = " ".join(a["criteria"][0]["findings"])
-    b_findings = " ".join(b["criteria"][0]["findings"])
-    assert "1 GL account" in a_findings or a["has_data"] or "0 GL" not in a_findings
-    assert "0 GL accounts" in b_findings  # beta never sees alpha's account
-    assert a_findings != b_findings
+    # alpha has the account (positive state asserted directly); beta is empty
+    # and its "no data to verify" guard names 0 GL accounts — the isolation
+    # guarantee. Data posted to alpha is invisible via beta's header.
+    assert a["has_data"] is True
+    assert b["has_data"] is False
+    assert "0 GL accounts" in " ".join(b["criteria"][0]["findings"])
 
 
 @pytestmark_ws
@@ -169,12 +195,19 @@ def test_unknown_and_hostile_workspace_headers(registry):
 
 
 @pytestmark_ws
-def test_whoami_lists_workspaces_when_routing_enabled(registry):
+def test_whoami_confirms_own_workspace_but_never_enumerates_others(registry):
     registry.create("alpha")
+    registry.create("beta")
     c = TestClient(create_app(workspace_registry=registry))
     body = c.get("/api/whoami", headers={"X-Govcon-Workspace": "alpha"}).json()
     assert body["workspace"] == "alpha"
-    assert body["workspaces"] == ["alpha"]
+    assert body["routing_enabled"] is True
+    # the tenant-name-disclosure guard: no field leaks the full workspace list
+    assert "beta" not in str(body)
+    assert "workspaces" not in body
+    # an unknown workspace is reported as such, still without listing others
+    unknown = c.get("/api/whoami", headers={"X-Govcon-Workspace": "ghost"}).json()
+    assert unknown["workspace"] == "unknown" and "beta" not in str(unknown)
 
 
 def test_limitations_state_asserted_identity(session_factory):

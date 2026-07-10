@@ -19,6 +19,7 @@ Design constraints (deliberate, load-bearing):
 from __future__ import annotations
 
 import datetime
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -29,6 +30,32 @@ from sqlalchemy.orm import Session
 from govcon.models import DecisionRule, DecisionTable
 from govcon.models.enums import ThresholdStatus
 from govcon.services.thresholds import status_caveat, threshold_in_force
+
+#: A reason template may reference ONLY simple {name} placeholders. This is a
+#: plain substitution, NOT str.format — so a template can never traverse
+#: attributes ({x.__class__...}), index, or reach object internals, even if a
+#: malicious/buggy rule row supplied one. An unknown name fails loudly.
+_TEMPLATE_FIELD = re.compile(r"\{(\w+)\}")
+
+
+def _render_template(template: str, rule_key: str, values: dict) -> str:
+    def _sub(m: re.Match) -> str:
+        name = m.group(1)
+        if name not in values:
+            raise ValueError(
+                f"rule {rule_key!r} reason_template references an "
+                f"unavailable name: {name!r}"
+            )
+        return str(values[name])
+
+    # A stray unmatched brace is an authoring error, not a silent literal.
+    stripped = _TEMPLATE_FIELD.sub("", template)
+    if "{" in stripped or "}" in stripped:
+        raise ValueError(
+            f"rule {rule_key!r} reason_template has an unmatched brace: {template!r}"
+        )
+    return _TEMPLATE_FIELD.sub(_sub, template)
+
 
 _COMPARISONS = {
     "eq": lambda a, b: a == b,
@@ -222,15 +249,10 @@ def evaluate_table(
         if rule.outcome:
             result.outcome.update(rule.outcome)
         if rule.reason_template:
-            try:
-                result.reasons.append(
-                    rule.reason_template.format(**inputs, **ctx.threshold_values)
-                )
-            except (KeyError, IndexError) as exc:
-                raise ValueError(
-                    f"rule {rule.rule_key!r} reason_template references an "
-                    f"unavailable name: {exc}"
-                ) from exc
+            result.reasons.append(
+                _render_template(rule.reason_template, rule.rule_key,
+                                 {**inputs, **ctx.threshold_values})
+            )
         if rule.status is not None and rule.status != ThresholdStatus.FINAL_RULE:
             result.caveats.append(
                 f"rule {rule.rule_key!r} of decision table {table.table_name} "

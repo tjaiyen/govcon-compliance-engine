@@ -13,6 +13,7 @@ reports as a linkage failure.
 import concurrent.futures
 import datetime
 import os
+import threading
 
 import pytest
 import sqlalchemy as sa
@@ -30,10 +31,18 @@ def test_concurrent_writers_cannot_fork_the_audit_chain(session_factory):
     from govcon.models.enums import PeriodStatus
 
     writes_per_thread = 10
+    # A barrier realigns both threads immediately before each audited commit,
+    # so on EVERY iteration they contend for the read-last-hash/insert window
+    # simultaneously. Without this, fast transactions ping-pong sequentially
+    # and the race the advisory lock exists to prevent rarely even occurs —
+    # the test would pass even with the lock removed. With it, deleting the
+    # pg_advisory_xact_lock line makes this deterministically red.
+    barrier = threading.Barrier(2)
 
     def writer(thread_no: int) -> None:
         # each thread: its own sessions, distinct fiscal years (unique key)
         for i in range(writes_per_thread):
+            barrier.wait(timeout=10)
             with session_factory() as session:
                 session.add(Period(
                     fiscal_year=2100 + thread_no,

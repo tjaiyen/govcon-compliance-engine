@@ -317,9 +317,16 @@ def test_no_core_dml_on_business_tables_in_services():
 
     services = pathlib.Path(__file__).resolve().parent.parent / "src" / "govcon" / "services"
     offenders = []
-    pattern = re.compile(r"session\.execute\(\s*sa\.(insert|update|delete)\(", re.S)
+    # Flag BOTH the expression form (sa.insert(...)) AND raw-SQL DML
+    # (session.execute(sa.text("UPDATE ..."))) — either bypasses the audit
+    # listener. The raw-SQL branch was a latent hole this stress test closed.
+    expr_dml = re.compile(r"session\.execute\(\s*sa\.(insert|update|delete)\(", re.S)
+    text_dml = re.compile(
+        r"""session\.execute\(\s*sa\.text\(\s*["']?\s*(insert|update|delete)\b""",
+        re.S | re.I,
+    )
     for py in services.glob("*.py"):
         text = py.read_text(encoding="utf-8")
-        if pattern.search(text):
+        if expr_dml.search(text) or text_dml.search(text):
             offenders.append(py.name)
     assert offenders == [], f"Core DML on business tables bypasses audit+guards: {offenders}"

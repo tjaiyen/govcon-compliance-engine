@@ -209,3 +209,48 @@ def test_limitations_now_state_the_suggester_boundary(session_factory):
     c = TestClient(create_app(session_factory=session_factory))
     about = c.get("/api/about").text
     assert "REGULATION WATCH IS A SUGGESTER" in about
+
+
+def test_malformed_documents_are_skipped_not_crashed(session):
+    """Untrusted fetched data (B13): a doc missing its id or carrying an
+    un-parseable date is reported malformed and skipped — one bad document
+    must never abort the whole scan and lose the good ones."""
+    good = dict(CAS_DOC)
+    no_id = {"title": "no document_number", "publication_date": "2026-07-01"}
+    bad_date = dict(CAS_DOC, document_number="2026-99999",
+                    publication_date="2026-13-99")  # invalid month
+
+    def mixed(term, since):
+        return {"count": 3, "results": [good, no_id, bad_date]}
+
+    r = _scan(session, fetcher=mixed)
+    n_targets = len(r.targets)
+    # the fetcher returns the same 3 docs per watch target: the good doc is
+    # recorded once per target, the two bad docs are reported malformed per
+    # target — one bad document never aborts the scan.
+    assert len(r.new_suggestions) == n_targets
+    assert len(r.malformed) == 2 * n_targets
+    reasons = " ".join(m["error"] for m in r.malformed)
+    assert "document_number" in reasons
+    assert "month" in reasons.lower()  # the un-parseable date, reported not crashed
+
+
+def test_response_size_cap_rejects_a_huge_body():
+    """default_fetcher caps the read so a hijacked/redirected endpoint can't
+    exhaust memory. Exercise the cap with a fake urlopen returning an oversize
+    body."""
+    import io
+    from unittest import mock
+
+    from govcon.services import regulation_watch as rw
+
+    oversize = b'{"x":"' + b"a" * (rw._MAX_RESPONSE_BYTES + 100) + b'"}'
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    with mock.patch.object(rw.urllib.request, "urlopen",
+                           return_value=_Resp(oversize)):
+        with pytest.raises(ValueError, match="exceeded"):
+            rw.default_fetcher("cost accounting standards", datetime.date(2026, 4, 1))
