@@ -50,10 +50,14 @@ class CASRequest(BaseModel):
 class TINARequest(BaseModel):
     action_date: datetime.date
     proposed_value: str = Field(..., description="Decimal string")
-    tina_exception_adequate_price_competition: bool = False
-    tina_exception_commercial_product_service: bool = False
-    tina_exception_prices_set_by_law: bool = False
-    tina_exception_waiver_granted: bool = False
+    # Tri-state, like the DB columns: None = not yet evaluated (the honest
+    # default — omitting a field must NOT silently assert "evaluated False";
+    # a Phase 2 education test caught the old bool=False default doing
+    # exactly that, which made the pending path unreachable via the API).
+    tina_exception_adequate_price_competition: bool | None = None
+    tina_exception_commercial_product_service: bool | None = None
+    tina_exception_prices_set_by_law: bool | None = None
+    tina_exception_waiver_granted: bool | None = None
 
 
 def _money(raw: str) -> Decimal:
@@ -107,6 +111,7 @@ def create_app(session_factory=None) -> FastAPI:
             "disclosure_required": d.disclosure_required,
             "reasons": d.reasons,
             "caveats": d.caveats,
+            "provenance": d.provenance,
         }
 
     @app.post("/api/tina")
@@ -137,6 +142,7 @@ def create_app(session_factory=None) -> FastAPI:
             "unevaluated_exceptions": d.unevaluated_exceptions,
             "reasons": d.reasons,
             "caveats": d.caveats,
+            "provenance": d.provenance,
         }
 
     @app.get("/api/threshold")
@@ -185,6 +191,19 @@ def create_app(session_factory=None) -> FastAPI:
                 for i in items
             ],
         }
+
+    # --------------------------------------------------------------- education
+    @app.get("/api/glossary")
+    def glossary() -> dict:
+        from govcon.education import GLOSSARY
+
+        return {"terms": GLOSSARY}
+
+    @app.get("/api/scenarios")
+    def scenarios() -> dict:
+        from govcon.education import SCENARIOS
+
+        return {"scenarios": SCENARIOS}
 
     @app.get("/api/about", response_class=PlainTextResponse)
     def about() -> str:

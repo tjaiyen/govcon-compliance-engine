@@ -67,6 +67,26 @@ ul.reasons li { font-size: 0.9rem; color: #dce8f2; margin: 5px 0; }
 .watch-item { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: #bcd0e0; padding: 8px 0; border-bottom: 1px solid rgba(159,184,205,0.1); }
 .watch-item .due { color: #ff6b6b; } .watch-item .kind { color: #96abbc; }
 .muted { color: #96abbc; font-size: 0.85rem; }
+.persona-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+.p-label { font-size: 0.8rem; color: #96abbc; margin-right: 2px; }
+.persona-bar button { margin-top: 0; padding: 7px 13px; background: none; color: #bcd0e0; border: 1px solid rgba(159,184,205,0.34); border-radius: 999px; font-weight: 500; }
+.persona-bar button[aria-pressed="true"] { background: var(--accent); color: #0a1f33; border-color: var(--accent); font-weight: 600; }
+.p-desc { color: #96abbc; font-size: 0.82rem; margin: 8px 0 0; min-height: 1.2em; }
+.prov { margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: #6bb6ec; border: 1px dashed rgba(107,182,236,0.4); border-radius: 4px; padding: 8px 10px; }
+.scenario { border: 1px solid rgba(159,184,205,0.16); border-radius: 4px; padding: 14px 16px; margin-top: 12px; background: #0d2236; }
+.scenario h3 { margin: 0 0 6px; font-size: 0.98rem; }
+.scenario .story { font-size: 0.88rem; color: #bcd0e0; margin: 0 0 10px; }
+.scenario button { margin-top: 8px; margin-right: 8px; }
+.s-run { margin-top: 14px; }
+.chip { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; border: 1px solid rgba(159,184,205,0.3); border-radius: 999px; padding: 2px 9px; margin: 0 6px 6px 0; color: #bcd0e0; text-decoration: none; }
+.chip:hover, .chip:focus-visible { border-color: var(--accent); color: var(--accent); }
+details.gloss { border-bottom: 1px solid rgba(159,184,205,0.1); }
+details.gloss summary { cursor: pointer; padding: 11px 0; font-size: 0.92rem; color: #eaf2f9; list-style: none; }
+details.gloss summary::-webkit-details-marker { display: none; }
+details.gloss summary::before { content: '+ '; color: var(--accent); font-family: 'IBM Plex Mono', monospace; }
+details.gloss[open] summary::before { content: '- '; }
+details.gloss .g-body { padding: 0 0 14px; font-size: 0.88rem; color: #bcd0e0; }
+.hint { font-size: 0.82rem; color: #96abbc; margin-top: 10px; }
 footer { margin-top: 40px; border-top: 1px solid rgba(159,184,205,0.16); padding-top: 20px; color: #96abbc; font-size: 0.82rem; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
@@ -82,6 +102,25 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <p>Enter a contract and this runs the real FAR/CAS/TINA logic, then explains every determination in plain language. Nothing here is stored; it's a place to check and to learn.</p>
   </header>
 
+  <!-- ============ persona selector (Phase 2) ============ -->
+  <div class="persona-bar" role="group" aria-label="Choose how much depth to show">
+    <span class="p-label">Show me the view for a&hellip;</span>
+    <button type="button" id="p-newcomer" aria-pressed="false">Newcomer</button>
+    <button type="button" id="p-analyst" aria-pressed="false">Analyst</button>
+    <button type="button" id="p-controller" aria-pressed="false">Controller</button>
+    <button type="button" id="p-executive" aria-pressed="false">Executive</button>
+    <button type="button" id="p-auditor" aria-pressed="false">Auditor</button>
+  </div>
+  <p class="p-desc" id="p-desc" aria-live="polite"></p>
+
+  <!-- ============ scenario library (Phase 2) ============ -->
+  <section class="card" id="sec-learn">
+    <p class="eyebrow-sm">Flow 00 &middot; Learn by example</p>
+    <h2>Six scenarios that teach the traps</h2>
+    <p class="sub">Each one runs live against the engine &mdash; the story, the real answer, and what to notice. These are the same cases the test suite proves.</p>
+    <div id="scenario-list"><p class="muted">Loading&hellip;</p></div>
+  </section>
+
   <!-- ============ CAS / TINA workbench ============ -->
   <section class="card">
     <p class="eyebrow-sm">Flow 01 · Dated thresholds</p>
@@ -96,11 +135,13 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       </div>
       <div class="check"><input type="checkbox" id="c-nontrad"><label for="c-nontrad" style="margin:0">Nontraditional defense contractor</label></div>
       <fieldset>
-        <legend>TINA exceptions (any one waives certified-data)</legend>
-        <div class="check"><input type="checkbox" id="e-apc"><label for="e-apc" style="margin:0">Adequate price competition</label></div>
-        <div class="check"><input type="checkbox" id="e-com"><label for="e-com" style="margin:0">Commercial product / service</label></div>
-        <div class="check"><input type="checkbox" id="e-law"><label for="e-law" style="margin:0">Prices set by law or regulation</label></div>
-        <div class="check"><input type="checkbox" id="e-waiver"><label for="e-waiver" style="margin:0">Waiver granted</label></div>
+        <legend>TINA statutory exceptions &mdash; evaluate each on THIS action (unset = not yet evaluated)</legend>
+        <div class="grid">
+          <div><label for="e-apc">Adequate price competition</label><select id="e-apc"><option value="">Not evaluated</option><option value="true">Yes &mdash; applies</option><option value="false">No &mdash; does not apply</option></select></div>
+          <div><label for="e-com">Commercial product / service</label><select id="e-com"><option value="">Not evaluated</option><option value="true">Yes &mdash; applies</option><option value="false">No &mdash; does not apply</option></select></div>
+          <div><label for="e-law">Prices set by law or regulation</label><select id="e-law"><option value="">Not evaluated</option><option value="true">Yes &mdash; applies</option><option value="false">No &mdash; does not apply</option></select></div>
+          <div><label for="e-waiver">Waiver granted</label><select id="e-waiver"><option value="">Not evaluated</option><option value="true">Yes &mdash; applies</option><option value="false">No &mdash; does not apply</option></select></div>
+        </div>
       </fieldset>
       <button type="submit">Check this contract</button>
     </form>
@@ -145,6 +186,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <div id="r-watch" aria-live="polite"><p class="muted">Loading…</p></div>
   </section>
 
+  <!-- ============ glossary (Phase 2) ============ -->
+  <section class="card" id="sec-gloss">
+    <p class="eyebrow-sm">Flow 05 &middot; Say it plainly</p>
+    <h2>Glossary</h2>
+    <p class="sub">Plain-language definitions, each with the engine&rsquo;s real seeded numbers &mdash; never invented figures.</p>
+    <div id="gloss-list"><p class="muted">Loading&hellip;</p></div>
+  </section>
+
   <footer>
     Plain-English reference: <a href="https://tjaiyen.github.io/govcon-compliance-engine/#sec-glossary" target="_blank" rel="noopener">the glossary &#8599;</a>.
     Every term here is defined there. This workbench operates on synthetic data only and is not a substitute for professional audit or legal judgment.
@@ -158,22 +207,94 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   function esc(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function post(url, body) { return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }); }
   function get(url) { return fetch(url).then(function (r) { return r.json(); }); }
+  function slug(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
 
+  // ---- personas: same data, different depth ----
+  var PERSONAS = {
+    newcomer:  { label: "Newcomer",   desc: "Plain answers with the teaching open by default — start with the scenarios below.", teach: "open",   prov: false, hints: true },
+    analyst:   { label: "Analyst",    desc: "Answer first; reasons and caveats one click away.",                                  teach: "closed", prov: false, hints: false },
+    controller:{ label: "Controller", desc: "Review flags and regulatory caveats always in view.",                               teach: "closed", prov: false, hints: false, caveatsOut: true },
+    executive: { label: "Executive",  desc: "Verdicts only — with a count of the caveats you are not reading.",                  teach: "none",   prov: false, hints: false },
+    auditor:   { label: "Auditor",    desc: "Everything, plus which decision-table rules fired and every citation.",             teach: "open",   prov: true,  hints: false }
+  };
+  var personaKeys = ["newcomer", "analyst", "controller", "executive", "auditor"];
+  var persona = "newcomer";
+  try { if (PERSONAS[localStorage.getItem("govcon-persona")]) persona = localStorage.getItem("govcon-persona"); } catch (e) {}
+
+  function P() { return PERSONAS[persona]; }
+
+  function setPersona(key) {
+    persona = key;
+    try { localStorage.setItem("govcon-persona", key); } catch (e) {}
+    personaKeys.forEach(function (k) { $("p-" + k).setAttribute("aria-pressed", String(k === key)); });
+    $("p-desc").textContent = P().desc;
+    rerenderAll();
+  }
+
+  // ---- persona-aware result rendering ----
   function reasonsBlock(reasons, caveats) {
     var h = "";
     if (reasons && reasons.length) {
       h += '<div class="why">Why</div><ul class="reasons">' + reasons.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
     }
-    if (caveats && caveats.length) {
-      h += caveats.map(function (x) { return '<div class="caveat">' + esc(x) + "</div>"; }).join("");
-    }
+    h += caveatsBlock(caveats);
     return h;
   }
-  function teach(reasons, caveats) {
-    return '<details class="teach"><summary>Teach me — why this answer?</summary><div class="body">' + reasonsBlock(reasons, caveats) + "</div></details>";
+  function caveatsBlock(caveats) {
+    if (!caveats || !caveats.length) return "";
+    return caveats.map(function (x) { return '<div class="caveat">' + esc(x) + "</div>"; }).join("");
+  }
+  function provBlock(p) {
+    if (!P().prov || !p) return "";
+    return '<div class="prov">decision table ' + esc(p.decision_table) + " v" + esc(p.version) +
+      " &middot; rules fired: " + p.fired_rules.map(esc).join(" &rarr; ") + "</div>";
+  }
+  function teach(reasons, caveats, prov) {
+    var mode = P().teach;
+    var h = "";
+    if (mode === "none") {
+      var n = (caveats || []).length;
+      if (n) h += '<p class="hint">' + n + " regulatory caveat" + (n > 1 ? "s" : "") + " apply — switch view to read them.</p>";
+      return h;
+    }
+    var inner = P().caveatsOut ? reasonsBlock(reasons, []) : reasonsBlock(reasons, caveats);
+    h += '<details class="teach"' + (mode === "open" ? " open" : "") + '><summary>Teach me — why this answer?</summary><div class="body">' + inner + "</div></details>";
+    if (P().caveatsOut) h += caveatsBlock(caveats);
+    h += provBlock(prov);
+    return h;
   }
 
-  // ---- CAS / TINA ----
+  function casVerdict(cas) {
+    if (!cas.available) return '<div class="verdict"><span class="tag info">CAS</span><h3>No rule in force on that date</h3></div><p class="muted">' + esc(cas.message) + "</p>";
+    var tag = cas.tier === "full" ? "stop" : (cas.tier === "modified" ? "warn" : "ok");
+    var label = { none: "No CAS coverage", modified: "Modified CAS coverage", full: "Full CAS coverage", exempt_small_business: "CAS-exempt (small business)", review_nontraditional: "Flag for review (nontraditional)" }[cas.tier] || cas.tier;
+    var flags = "";
+    if (cas.requires_review) flags += ' <span class="tag warn">review required</span>';
+    if (cas.disclosure_required) flags += ' <span class="tag stop">DS-1 disclosure</span>';
+    return '<div class="verdict"><span class="tag ' + tag + '">CAS</span><h3>' + esc(label) + "</h3>" + flags + "</div>" + teach(cas.reasons, cas.caveats, cas.provenance);
+  }
+  function tinaVerdict(tina) {
+    if (!tina.available) return '<div class="verdict"><span class="tag info">TINA</span><h3>No rule in force on that date</h3></div><p class="muted">' + esc(tina.message) + "</p>";
+    var req = tina.certification_required;
+    var tag = req === true ? "stop" : (req === false ? "ok" : "warn");
+    var label = req === true ? "Certified cost or pricing data REQUIRED" : (req === false ? "Certified data not required" : "Pending — exceptions not yet evaluated");
+    return '<div class="verdict"><span class="tag ' + tag + '">TINA</span><h3>' + esc(label) + '</h3><span class="mono muted">bar in force: $' + esc(tina.threshold_value) + "</span></div>" + teach(tina.reasons, tina.caveats, tina.provenance);
+  }
+  function renderMini(endpoint, body) {
+    return endpoint === "cas" ? casVerdict(body) : tinaVerdict(body);
+  }
+
+  // ---- flow 01: CAS / TINA workbench ----
+  var lastContract = null;
+  function tri(id) { var v = $(id).value; return v === "" ? null : v === "true"; }
+  function renderContract() {
+    if (!lastContract) return;
+    var host = $("r-contract"); host.hidden = false;
+    var h = casVerdict(lastContract.cas);
+    h += '<div style="margin-top:18px">' + tinaVerdict(lastContract.tina) + "</div>";
+    if (P().hints) h += '<p class="hint">New to a term? Every one is defined in the <a href="#sec-gloss">glossary below</a>.</p>';
+    host.innerHTML = h;
+  }
   $("f-contract").addEventListener("submit", function (e) {
     e.preventDefault();
     var casBody = {
@@ -186,36 +307,95 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     var tinaBody = {
       action_date: $("c-date").value,
       proposed_value: $("c-value").value.replace(/[$,\s]/g, ""),
-      tina_exception_adequate_price_competition: $("e-apc").checked,
-      tina_exception_commercial_product_service: $("e-com").checked,
-      tina_exception_prices_set_by_law: $("e-law").checked,
-      tina_exception_waiver_granted: $("e-waiver").checked,
+      tina_exception_adequate_price_competition: tri("e-apc"),
+      tina_exception_commercial_product_service: tri("e-com"),
+      tina_exception_prices_set_by_law: tri("e-law"),
+      tina_exception_waiver_granted: tri("e-waiver"),
     };
     var host = $("r-contract"); host.hidden = false; host.innerHTML = '<p class="muted">Running the logic…</p>';
     Promise.all([post("/api/cas", casBody), post("/api/tina", tinaBody)]).then(function (res) {
-      var cas = res[0], tina = res[1], h = "";
-      // CAS
-      if (!cas.available) {
-        h += '<div class="verdict"><span class="tag info">CAS</span><h3>No rule in force on that date</h3></div><p class="muted">' + esc(cas.message) + "</p>";
-      } else {
-        var casTag = cas.tier === "full" ? "stop" : (cas.tier === "modified" ? "warn" : "ok");
-        var casLabel = { none: "No CAS coverage", modified: "Modified CAS coverage", full: "Full CAS coverage", exempt_small_business: "CAS-exempt (small business)", review_nontraditional: "Flag for review (nontraditional)" }[cas.tier] || cas.tier;
-        h += '<div class="verdict"><span class="tag ' + casTag + '">CAS</span><h3>' + esc(casLabel) + "</h3></div>" + teach(cas.reasons, cas.caveats);
-      }
-      // TINA
-      if (!tina.available) {
-        h += '<div style="margin-top:18px"><div class="verdict"><span class="tag info">TINA</span><h3>No rule in force on that date</h3></div><p class="muted">' + esc(tina.message) + "</p></div>";
-      } else {
-        var req = tina.certification_required;
-        var tinaTag = req === true ? "stop" : (req === false ? "ok" : "warn");
-        var tinaLabel = req === true ? "Certified cost or pricing data REQUIRED" : (req === false ? "Certified data not required" : "Pending exception review");
-        h += '<div style="margin-top:18px"><div class="verdict"><span class="tag ' + tinaTag + '">TINA</span><h3>' + esc(tinaLabel) + "</h3><span class=\"mono muted\">bar in force: $" + esc(tina.threshold_value) + "</span></div>" + teach(tina.reasons, tina.caveats) + "</div>";
-      }
-      host.innerHTML = h;
+      lastContract = { cas: res[0], tina: res[1] };
+      renderContract();
     }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine.</p>'; });
   });
 
-  // ---- threshold explorer ----
+  // ---- flow 00: scenario library (executable teaching) ----
+  var scenarioResults = {};   // id -> array of response bodies
+  var scenariosData = [];
+  function renderScenarioResult(s) {
+    var host = $("s-out-" + s.id);
+    var results = scenarioResults[s.id];
+    if (!results) return;
+    var h = "";
+    results.forEach(function (b, i) {
+      h += '<div class="s-run"><div class="why">' + esc(s.runs[i].label) + "</div>" + renderMini(s.runs[i].endpoint, b) + "</div>";
+    });
+    h += '<div class="why">What to notice</div><ul class="reasons">' + s.notice.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
+    host.hidden = false;
+    host.innerHTML = h;
+  }
+  function runScenario(s) {
+    var host = $("s-out-" + s.id);
+    host.hidden = false; host.innerHTML = '<p class="muted">Running ' + s.runs.length + " live call" + (s.runs.length > 1 ? "s" : "") + " against the engine…</p>";
+    Promise.all(s.runs.map(function (r) { return post("/api/" + r.endpoint, r.inputs); })).then(function (results) {
+      scenarioResults[s.id] = results;
+      renderScenarioResult(s);
+    }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine.</p>'; });
+  }
+  function prefill(run) {
+    var inp = run.inputs;
+    if (run.endpoint === "cas") {
+      $("c-date").value = inp.award_date;
+      $("c-value").value = inp.contract_value;
+      $("c-size").value = inp.contractor_size || "other_than_small";
+      $("c-nontrad").checked = !!inp.is_nontraditional_dc;
+    } else {
+      $("c-date").value = inp.action_date;
+      $("c-value").value = inp.proposed_value;
+      var map = { "e-apc": "tina_exception_adequate_price_competition", "e-com": "tina_exception_commercial_product_service", "e-law": "tina_exception_prices_set_by_law", "e-waiver": "tina_exception_waiver_granted" };
+      Object.keys(map).forEach(function (id) {
+        var v = inp[map[id]];
+        $(id).value = v === true ? "true" : (v === false ? "false" : "");
+      });
+    }
+    document.getElementById("f-contract").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("c-date").focus({ preventScroll: true });
+  }
+  get("/api/scenarios").then(function (b) {
+    scenariosData = b.scenarios;
+    $("scenario-list").innerHTML = scenariosData.map(function (s) {
+      var chips = s.terms.map(function (t) { return '<a class="chip" href="#g-' + slug(t) + '">' + esc(t) + "</a>"; }).join("");
+      return '<div class="scenario" id="s-' + esc(s.id) + '"><h3>' + esc(s.title) + '</h3><p class="story">' + esc(s.story) + "</p>" + chips +
+        '<div><button type="button" class="s-run-btn" data-s="' + esc(s.id) + '">Run it live</button>' +
+        '<button type="button" class="ghost s-try-btn" data-s="' + esc(s.id) + '">Load into the workbench</button></div>' +
+        '<div class="result" id="s-out-' + esc(s.id) + '" aria-live="polite" hidden></div></div>';
+    }).join("");
+    $("scenario-list").addEventListener("click", function (e) {
+      var id = e.target && e.target.getAttribute && e.target.getAttribute("data-s");
+      if (!id) return;
+      var s = scenariosData.filter(function (x) { return x.id === id; })[0];
+      if (!s) return;
+      if (e.target.className.indexOf("s-try-btn") >= 0) prefill(s.runs[s.runs.length - 1]);
+      else runScenario(s);
+    });
+  }).catch(function () { $("scenario-list").innerHTML = '<p class="muted">Could not load the scenario library.</p>'; });
+
+  // ---- flow 05: glossary ----
+  get("/api/glossary").then(function (b) {
+    $("gloss-list").innerHTML = b.terms.map(function (t) {
+      return '<details class="gloss" id="g-' + slug(t.term) + '"><summary>' + esc(t.term) + '</summary><div class="g-body">' + esc(t.plain) +
+        '<div class="why">Why it matters</div>' + esc(t.why) +
+        '<div class="why">Example</div><span class="mono" style="font-size:0.82rem">' + esc(t.example) + "</span></div></details>";
+    }).join("");
+  }).catch(function () { $("gloss-list").innerHTML = '<p class="muted">Could not load the glossary.</p>'; });
+  // a chip/anchor click opens the entry it points at
+  function openHashTarget() {
+    var el = location.hash && document.getElementById(location.hash.slice(1));
+    if (el && el.tagName === "DETAILS") el.open = true;
+  }
+  window.addEventListener("hashchange", openHashTarget);
+
+  // ---- threshold explorer / SF 1408 / watch (persona-independent) ----
   $("f-th").addEventListener("submit", function (e) {
     e.preventDefault();
     var host = $("r-th"); host.hidden = false; host.innerHTML = '<p class="muted">Looking up…</p>';
@@ -229,7 +409,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     });
   });
 
-  // ---- SF 1408 ----
   $("b-sf").addEventListener("click", function () {
     var host = $("r-sf"); host.hidden = false; host.innerHTML = '<p class="muted">Running…</p>';
     get("/api/sf1408").then(function (b) {
@@ -243,7 +422,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     });
   });
 
-  // ---- reverify watch (auto) ----
   get("/api/reverify").then(function (b) {
     var host = $("r-watch");
     if (!b.items.length) { host.innerHTML = '<p class="muted">Nothing on the watch list.</p>'; return; }
@@ -251,6 +429,16 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       return '<div class="watch-item"><span class="kind">[' + esc(i.kind) + "]</span> " + (i.due ? '<span class="due">DUE</span> ' : "") + esc(i.description) + "</div>";
     }).join("");
   }).catch(function () { $("r-watch").innerHTML = '<p class="muted">Could not load the watch list.</p>'; });
+
+  // ---- persona switch re-renders everything already on screen ----
+  function rerenderAll() {
+    renderContract();
+    scenariosData.forEach(function (s) { if (scenarioResults[s.id]) renderScenarioResult(s); });
+  }
+  personaKeys.forEach(function (k) {
+    $("p-" + k).addEventListener("click", function () { setPersona(k); });
+  });
+  setPersona(persona);
 })();
 </script>
 </body>

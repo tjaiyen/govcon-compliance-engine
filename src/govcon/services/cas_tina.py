@@ -59,6 +59,19 @@ class CASDetermination:
     disclosure_required: bool = False
     trigger_threshold_id: int | None = None
     full_threshold_id: int | None = None
+    #: Audit-grade provenance (Phase 2): which decision-table version decided
+    #: this, and which rules fired, in order.
+    provenance: dict | None = None
+
+
+def _provenance(ev) -> dict:
+    """The audit-grade trail of a table evaluation — enough to reproduce the
+    determination by hand from `govcon rules show`."""
+    return {
+        "decision_table": ev.table_name,
+        "version": ev.version,
+        "fired_rules": list(ev.fired_rules),
+    }
 
 
 def _cumulative_prior_year_cas_awards(
@@ -106,6 +119,7 @@ def determine_cas_coverage(session: Session, contract: Contract) -> CASDetermina
         disclosure_required=ev.outcome["disclosure_required"],
         trigger_threshold_id=ev.threshold_ids.get("trigger"),
         full_threshold_id=ev.threshold_ids.get("full"),
+        provenance=_provenance(ev),
     )
 
 
@@ -120,6 +134,8 @@ class TINADetermination:
     unevaluated_exceptions: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: Audit-grade provenance (Phase 2): table version + fired rules, in order.
+    provenance: dict | None = None
 
 
 def determine_tina_applicability(
@@ -163,4 +179,5 @@ def determine_tina_applicability(
         unevaluated_exceptions=unevaluated,
         reasons=ev.reasons,
         caveats=ev.caveats,
+        provenance=_provenance(ev),
     )
