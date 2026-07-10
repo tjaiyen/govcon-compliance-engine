@@ -76,6 +76,11 @@ def _client_key(request: Request) -> str:
 #: statement should always be readable (the whole point of a limitations page).
 _PUBLIC_API_PATHS = frozenset({"/api/about"})
 
+#: The expensive AI routes the optional required-scope gate applies to (403 when
+#: a valid token lacks the scope). Read-only determinations stay open to any
+#: authenticated user.
+_SCOPE_GATED_PATHS = frozenset({"/api/ask", "/api/tutor"})
+
 
 def _bearer_token(request: Request) -> str | None:
     """Extract a single well-formed ``Bearer <token>``. A missing, duplicated
@@ -144,7 +149,7 @@ def install(app: FastAPI, verifier=None) -> None:
             # forbidden): read-only determinations stay usable to any valid user.
             if (
                 verifier.required_scope
-                and path == "/api/ask"
+                and path in _SCOPE_GATED_PATHS
                 and verifier.required_scope not in identity.scopes
             ):
                 get_logger("govcon.api").warning(
