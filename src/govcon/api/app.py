@@ -14,11 +14,12 @@ from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from govcon.core.identity import current_actor, reset_actor, set_actor
 from govcon.db.engine import make_engine, make_session_factory
 from govcon.models import Contract, ContractAction
 from govcon.models.enums import (
@@ -67,9 +68,15 @@ def _money(raw: str) -> Decimal:
         raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
 
 
-def create_app(session_factory=None) -> FastAPI:
+def create_app(session_factory=None, workspace_registry=None) -> FastAPI:
     """Build the app. ``session_factory`` is injectable for tests; otherwise it
-    is derived from ``GOVCON_DB_URL`` (via make_engine)."""
+    is derived from ``GOVCON_DB_URL`` (via make_engine).
+
+    ``workspace_registry`` (Phase 4) enables per-request workspace routing:
+    an ``X-Govcon-Workspace`` header selects an isolated workspace database
+    (see govcon.workspaces — physical isolation, deliberately not RLS).
+    Without a registry, or without the header, the default factory serves —
+    fully backward compatible."""
     factory = session_factory or make_session_factory(make_engine())
     app = FastAPI(
         title="GovCon Compliance Workbench",
@@ -79,10 +86,57 @@ def create_app(session_factory=None) -> FastAPI:
         ),
         version="0.1.0",
     )
+    workspace_factories: dict[str, object] = {}
 
-    def get_session() -> Iterator[Session]:
-        with factory() as session:
+    @app.middleware("http")
+    async def _attribute_request(request: Request, call_next):
+        # Asserted identity (stated limitation): a header names the actor;
+        # authentication is a deployment concern in front of this app.
+        user = request.headers.get("x-govcon-user")
+        token = set_actor(f"web:{user}" if user and user.strip() else "web:anonymous")
+        try:
+            return await call_next(request)
+        finally:
+            reset_actor(token)
+
+    def _factory_for(request: Request):
+        name = request.headers.get("x-govcon-workspace")
+        if not name or workspace_registry is None:
+            return factory
+        if name not in workspace_factories:
+            try:
+                if not workspace_registry.exists(name):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"no workspace {name!r} — create it with "
+                        "`govcon workspace create`",
+                    )
+            except ValueError as exc:  # hostile/invalid name — never a path
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+            workspace_factories[name] = make_session_factory(
+                make_engine(workspace_registry.url(name))
+            )
+        return workspace_factories[name]
+
+    def get_session(request: Request) -> Iterator[Session]:
+        with _factory_for(request)() as session:
             yield session
+
+    @app.get("/api/whoami")
+    def whoami(request: Request) -> dict:
+        """Who the engine will attribute this request's actions to, and
+        which isolated workspace it is routed at."""
+        return {
+            "actor": current_actor(),
+            "workspace": (
+                request.headers.get("x-govcon-workspace") or "default"
+                if workspace_registry is not None
+                else "default"
+            ),
+            "workspaces": (
+                workspace_registry.list() if workspace_registry is not None else None
+            ),
+        }
 
     # ---------------------------------------------------------------- the UI
     @app.get("/", response_class=HTMLResponse)

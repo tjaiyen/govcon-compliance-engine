@@ -26,10 +26,15 @@ watch_app = typer.Typer(
     help="Regulation watch — a Federal Register suggester with a mandatory "
     "human review step; it NEVER applies a change itself."
 )
+workspace_app = typer.Typer(
+    help="Isolated workspace databases (Phase 4 multi-tenancy: one workspace "
+    "= one database; physical isolation, not row-level policy)."
+)
 app.add_typer(db_app, name="db")
 app.add_typer(audit_app, name="audit")
 app.add_typer(rules_app, name="rules")
 app.add_typer(watch_app, name="watch")
+app.add_typer(workspace_app, name="workspace")
 
 
 @app.command()
@@ -372,6 +377,56 @@ def watch_review(
         typer.echo(f"#{row.suggestion_id} -> {row.status.value}")
 
 
+@workspace_app.command("create")
+def workspace_create(name: str) -> None:
+    """Create a workspace: a fresh database built by the REAL migrations
+    (triggers + threshold/decision-table seeds included)."""
+    from govcon.workspaces import WorkspaceRegistry
+
+    registry = WorkspaceRegistry()
+    try:
+        path = registry.create(name)
+    except (ValueError, FileExistsError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(f"workspace {name!r} created at {path}")
+    typer.echo(f"use it: GOVCON_DB_URL=sqlite:///{path} govcon ... "
+               f"(or the X-Govcon-Workspace header under `govcon serve --workspaces`)")
+
+
+@workspace_app.command("list")
+def workspace_list() -> None:
+    """List workspaces under $GOVCON_HOME/workspaces."""
+    from govcon.workspaces import WorkspaceRegistry
+
+    registry = WorkspaceRegistry()
+    names = registry.list()
+    if not names:
+        typer.echo("no workspaces — create one with `govcon workspace create <name>`")
+        return
+    for name in names:
+        typer.echo(f"{name}  {registry.path(name)}")
+
+
+@workspace_app.command("path")
+def workspace_path(name: str) -> None:
+    """Print a workspace's database path (for GOVCON_DB_URL wiring)."""
+    from govcon.workspaces import WorkspaceRegistry
+
+    registry = WorkspaceRegistry()
+    try:
+        if not registry.exists(name):
+            typer.echo(f"no workspace {name!r}", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(str(registry.path(name)))
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+
+
 @db_app.command("upgrade")
 def db_upgrade() -> None:
     """Run alembic upgrade head against GOVCON_DB_URL."""
@@ -405,6 +460,12 @@ def serve(
         "--demo",
         help="Spin up a fresh, migrated (threshold-seeded) SQLite DB for a "
         "zero-setup demo, instead of using GOVCON_DB_URL.",
+    ),
+    workspaces: bool = typer.Option(
+        False,
+        "--workspaces",
+        help="Enable per-request workspace routing via the "
+        "X-Govcon-Workspace header (see `govcon workspace`).",
     ),
 ) -> None:
     """Run the guided web workbench (advisory, synthetic data) on localhost.
@@ -440,8 +501,17 @@ def serve(
 
     from govcon.api import create_app
 
+    registry = None
+    if workspaces:
+        from govcon.workspaces import WorkspaceRegistry
+
+        registry = WorkspaceRegistry()
+        typer.echo(
+            f"workspace routing ON — X-Govcon-Workspace header selects one of: "
+            f"{registry.list() or '(none yet)'}"
+        )
     typer.echo(f"GovCon workbench (synthetic data) → http://{host}:{port}")
-    uvicorn.run(create_app(), host=host, port=port)
+    uvicorn.run(create_app(workspace_registry=registry), host=host, port=port)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
