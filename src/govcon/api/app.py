@@ -329,6 +329,7 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
         from govcon.ai.gate import assert_synthetic
         from govcon.api.hardening import _client_key
+        from govcon.core.logging import get_logger
 
         if not ask_limiter.allow(_client_key(request)):
             raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
@@ -351,6 +352,13 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 yield _sse({"type": "error", "cost_exceeded": True, "message": str(exc)})
             except SyntheticGateError as exc:  # belt-and-suspenders vs kernel gate
                 yield _sse({"type": "unavailable", "reason": str(exc)})
+            except Exception:
+                # Degrade, never break the stream: any unexpected error still
+                # terminates cleanly with an error + done, so the client is never
+                # left hanging on a half-open stream. Logged server-side; the
+                # client message is generic so no internals leak.
+                get_logger("govcon.api").exception("ai_stream_failed")
+                yield _sse({"type": "error", "message": "the assistant hit an unexpected error"})
             yield _sse({"type": "done"})
 
         return _sse_response(_events())

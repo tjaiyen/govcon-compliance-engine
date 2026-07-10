@@ -151,3 +151,25 @@ def test_draft_rule_does_not_stream(session_factory, make_fake, synthetic_mode):
     r = c.post("/api/draft-rule?stream=1", json={"instruction": "..."})
     assert r.headers["content-type"].startswith("application/json")
     assert r.json()["requires_human_migration"] is True
+
+
+class _BoomClient:
+    """An LLM client that raises an UNEXPECTED error (not a known AI error)."""
+
+    calls: list = []
+
+    def create(self, **kw):
+        raise RuntimeError("upstream exploded")
+
+
+def test_stream_terminates_cleanly_on_unexpected_error(session_factory, synthetic_mode):
+    # a mid-stream error must still emit error + done — never a half-open stream
+    c = TestClient(create_app(session_factory=session_factory, llm_client=_BoomClient()))
+    r = c.post("/api/ask?stream=1", json={"question": "hi"})
+    assert r.status_code == 200  # the stream had already started (200)
+    evts = _events(r.text)
+    assert any(e["type"] == "error" for e in evts)
+    assert evts[-1]["type"] == "done"  # always a clean terminal event
+    # the generic message doesn't leak internals
+    err = next(e for e in evts if e["type"] == "error")
+    assert "exploded" not in err.get("message", "")
