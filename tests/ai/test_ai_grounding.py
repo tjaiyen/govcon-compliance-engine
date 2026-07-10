@@ -39,6 +39,21 @@ def test_small_conversational_numbers_are_not_policed():
     assert r.verified, r.violations
 
 
+def test_bare_dollar_amount_with_currency_word_is_policed():
+    # the reviewer's hole: a bare 4-5 digit integer + a unit word ("dollars"/
+    # "USD") must be treated as a money claim regardless of size/formatting.
+    lg = _ledger(values={"7500000.00"})
+    for prose in ("It is 50000 dollars.", "The cap is 99999 USD.", "about 8000 dollars"):
+        r = GroundingVerifier().verify(prose, lg)
+        assert not r.verified, f"should flag: {prose!r}"
+
+
+def test_bare_amount_with_currency_word_passes_when_grounded():
+    lg = _ledger(values={"50000.00"})  # the engine actually returned it
+    r = GroundingVerifier().verify("The floor is 50000 dollars.", lg)
+    assert r.verified, r.violations
+
+
 def test_ungrounded_citation_is_flagged():
     lg = _ledger(citations=["FAR 15.403-4"])
     r = GroundingVerifier().verify("This is governed by 48 CFR 9903.201-2.", lg)
