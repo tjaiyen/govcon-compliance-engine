@@ -87,6 +87,13 @@ class WorkspaceRegistry:
         path = self.path(name)
         if path.exists():
             raise FileExistsError(f"workspace {name!r} already exists at {path}")
+        # Case-insensitive collision guard: on a case-insensitive filesystem
+        # 'Team'/'team' would clobber one file; reject before creating.
+        lower = name.lower()
+        if any(existing.lower() == lower for existing in self.list()):
+            raise FileExistsError(
+                f"workspace {name!r} collides case-insensitively with an existing one"
+            )
         self.root.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
             [sys.executable, "-m", "alembic", "upgrade", "head"],

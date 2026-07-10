@@ -110,6 +110,26 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         ),
         version="0.1.0",
     )
+    from govcon.api.hardening import install as install_hardening
+    from govcon.api.hardening import make_ask_limiter
+
+    install_hardening(app)  # request-id + security headers + optional gate/CORS
+    ask_limiter = make_ask_limiter()
+
+    @app.get("/health")
+    def health() -> dict:
+        """Liveness + a cheap DB readiness probe."""
+        import sqlalchemy as sa
+
+        try:
+            with factory() as s:
+                s.execute(sa.text("SELECT 1"))
+            db_ok = True
+        except Exception:  # pragma: no cover - only on a broken DB
+            db_ok = False
+        return {"status": "ok" if db_ok else "degraded", "db": db_ok,
+                "ai": llm_client is not None}
+
     # Bounded engine cache (one connection pool per workspace); an LRU cap +
     # lock stop unbounded pool growth and a check-then-build race across the
     # sync-endpoint threadpool.
@@ -194,9 +214,15 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         makes the determination; unverified prose is withheld."""
         if llm_client is None:
             return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from fastapi import HTTPException as _HTTPException
+
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
         from govcon.ai.gate import assert_synthetic
         from govcon.ai.patterns import ask as run_ask
+        from govcon.api.hardening import _client_key
+
+        if not ask_limiter.allow(_client_key(request)):
+            raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
 
         try:
             assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
@@ -237,8 +263,18 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
     # ---------------------------------------------------------------- the UI
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return (_WEB_DIR / "index.html").read_text(encoding="utf-8")
+    def index() -> HTMLResponse:
+        html = (_WEB_DIR / "index.html").read_text(encoding="utf-8")
+        # Explicit charset + a short revalidating cache: the 140KB file (mostly
+        # inlined fonts) is cacheable, but must-revalidate so a redeploy of the
+        # UI code is picked up promptly rather than served stale forever.
+        return HTMLResponse(
+            html,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Cache-Control": "max-age=300, must-revalidate",
+            },
+        )
 
     # ------------------------------------------------------------ determinations
     @app.post("/api/cas")
@@ -343,25 +379,37 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             ],
         }
 
+    _SUGGESTIONS_CAP = 500
+
     @app.get("/api/suggestions")
-    def suggestions(session: Session = Depends(get_session)) -> dict:
+    def suggestions(
+        session: Session = Depends(get_session), limit: int = _SUGGESTIONS_CAP
+    ) -> dict:
         """Regulation-watch inbox, read-only. Scanning (network + writes) and
-        reviewing stay CLI-only on purpose — the workbench never mutates."""
+        reviewing stay CLI-only on purpose — the workbench never mutates.
+        Hard-capped so the response can never blow up memory; ``truncated``
+        flags when the cap hit."""
         import sqlalchemy as sa
 
         from govcon.models import RegulatorySuggestion
 
+        capped = max(1, min(limit, _SUGGESTIONS_CAP))
         rows = (
             session.execute(
-                sa.select(RegulatorySuggestion).order_by(
+                sa.select(RegulatorySuggestion)
+                .order_by(
                     RegulatorySuggestion.strong_match.desc(),
                     RegulatorySuggestion.publication_date.desc(),
                 )
+                .limit(capped + 1)
             )
             .scalars()
             .all()
         )
+        truncated = len(rows) > capped
+        rows = rows[:capped]
         return {
+            "truncated": truncated,
             "suggestions": [
                 {
                     "suggestion_id": r.suggestion_id,
