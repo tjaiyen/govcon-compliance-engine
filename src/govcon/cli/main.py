@@ -510,8 +510,22 @@ def serve(
             f"workspace routing ON — X-Govcon-Workspace header selects one of: "
             f"{registry.list() or '(none yet)'}"
         )
+    # AI assistant: enabled only if the ai extra + ANTHROPIC_API_KEY are present
+    # AND data mode is synthetic (fail-closed). Absent → the AI endpoints report
+    # unavailable and the workbench runs unchanged.
+    from govcon.ai import default_client_or_none
+    from govcon.ai.gate import is_synthetic
+
+    llm_client = default_client_or_none() if is_synthetic() else None
+    typer.echo(
+        f"AI assistant: {'ON (synthetic-data only)' if llm_client else 'off (no key / non-synthetic mode)'}"
+    )
     typer.echo(f"GovCon workbench (synthetic data) → http://{host}:{port}")
-    uvicorn.run(create_app(workspace_registry=registry), host=host, port=port)
+    uvicorn.run(
+        create_app(workspace_registry=registry, llm_client=llm_client),
+        host=host,
+        port=port,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess

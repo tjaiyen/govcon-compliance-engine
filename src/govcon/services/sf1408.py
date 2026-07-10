@@ -217,6 +217,14 @@ regulatory reference §4):
    a threshold or rule itself (parsing regulation is fragile; every change
    lands as a reviewed migration), and a suggestion is not a legal
    conclusion.
+7. AI ASSISTANT IS A RENDERING, NOT A DETERMINATION: the conversational /
+   tutor / drafting layer translates plain English to and from the engine's
+   structured inputs and explains results. It never makes a compliance
+   determination — the structured determination (tier, reasons, caveats,
+   provenance, citation) is the authoritative, audited fact. AI prose is
+   verified to cite only engine-produced values, is withheld when it cannot
+   be verified, and is never itself a system-of-record entry. The AI layer
+   runs on SYNTHETIC data only (fail-closed).
 """
 
 
