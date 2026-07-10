@@ -112,6 +112,13 @@ class DraftRuleRequest(BaseModel):
     )
 
 
+class NarrativeRequest(BaseModel):
+    instruction: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="Describe the situation to draft a grounded memo/narrative for.",
+    )
+
+
 def create_app(session_factory=None, workspace_registry=None, llm_client=None) -> FastAPI:
     """Build the app. ``session_factory`` is injectable for tests; otherwise it
     is derived from ``GOVCON_DB_URL`` (via make_engine).
@@ -386,6 +393,36 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 max_usd=max_usd,
             ),
             envelope=_draft_envelope,
+        )
+
+    @app.post("/api/draft-narrative")
+    def draft_narrative(
+        req: NarrativeRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """Narrative drafter (Pattern 4): describe a situation → the AI drafts a
+        memo grounded ENTIRELY in the engine's computed numbers, returned beside
+        the authoritative determination. Strictest grounding (an ungrounded figure
+        withholds the memo). A SYNTHETIC, advisory draft — never a filing."""
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import draft_narrative as run_narrative
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_narrative(
+                llm_client,
+                session,
+                req.instruction,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+            extra={
+                "synthetic_banner": (
+                    "SYNTHETIC DATA — DRAFT NARRATIVE FOR INTERNAL REVIEW, NOT FOR "
+                    "FILING OR CERTIFICATION"
+                )
+            },
         )
 
     # ---------------------------------------------------------------- the UI
