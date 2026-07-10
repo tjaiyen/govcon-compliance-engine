@@ -173,6 +173,52 @@ def _run_limitations(session: Session, inp: dict) -> dict:
     return {"limitations": explain_limitations()}
 
 
+def _run_watch_review(session: Session, inp: dict) -> dict:
+    """Read-only: the regulation-watch inbox, so a rule-authoring session can be
+    grounded in an ACTUAL suggested change rather than a hallucinated one. Never
+    writes; mirrors /api/suggestions (strong matches first)."""
+    import sqlalchemy as sa
+
+    from govcon.models import RegulatorySuggestion
+
+    rows = (
+        session.execute(
+            sa.select(RegulatorySuggestion)
+            .order_by(
+                RegulatorySuggestion.strong_match.desc(),
+                RegulatorySuggestion.publication_date.desc(),
+            )
+            .limit(20)
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "suggestions": [
+            {
+                "suggestion_id": r.suggestion_id,
+                "watch_rule": r.watch_rule,
+                "document_number": r.document_number,
+                "doc_type": r.doc_type,
+                "title": r.title,
+                "effective_on": None if r.effective_on is None else r.effective_on.isoformat(),
+                "url": r.url,
+                "strong_match": r.strong_match,
+                "status": r.status.value,
+            }
+            for r in rows
+        ]
+    }
+
+
+def _run_validate_draft_rule(session: Session, inp: dict) -> dict:
+    """Structurally validate a DRAFT decision rule against the engine grammar.
+    Pure — writes nothing, executes nothing (B53). ``session`` is ignored."""
+    from govcon.services.rule_authoring import validate_draft_rule
+
+    return validate_draft_rule(inp.get("rule") if isinstance(inp.get("rule"), dict) else inp)
+
+
 # ------------------------------------------------------------------- registry
 _CONTRACTOR_SIZE = {"type": "string", "enum": [s.value for s in ContractorSize]}
 _AGENCY = {"type": "string", "enum": [a.value for a in AgencyType]}
@@ -270,6 +316,38 @@ TOOLS: dict[str, ToolSpec] = {
             input_schema={"type": "object", "properties": {}},
             run=_run_limitations,
         ),
+        ToolSpec(
+            name="regulation_watch_review",
+            description=(
+                "Read-only: list the current regulation-watch suggestions (Federal "
+                "Register hits a human should review). Use to ground a rule draft in "
+                "a real suggested change. It changes nothing."
+            ),
+            input_schema={"type": "object", "properties": {}},
+            run=_run_watch_review,
+        ),
+        ToolSpec(
+            name="validate_draft_rule",
+            description=(
+                "Structurally validate a DRAFT decision-table rule against the engine's "
+                "grammar (does its when_ast parse; does reason_template use only {name} "
+                "placeholders). Returns {valid, errors, references, requires_human_migration}. "
+                "It NEVER applies the rule — a valid draft still needs a human-reviewed "
+                "migration. Pass the draft as {\"rule\": {rule_key, when_ast, outcome, "
+                "reason_template, stop}}."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "rule": {
+                        "type": "object",
+                        "description": "The draft rule: rule_key, when_ast, outcome, reason_template, stop.",
+                    }
+                },
+                "required": ["rule"],
+            },
+            run=_run_validate_draft_rule,
+        ),
     ]
 }
 
@@ -288,6 +366,18 @@ ASK_TOOLS = [
 #: can point a learner at a hands-on example. Still read-only, still no tool that
 #: computes a determination the AI could fabricate.
 TUTOR_TOOLS = [*ASK_TOOLS, "list_scenarios"]
+
+#: Pattern 3 (rule-authoring): read the watch inbox + validate a draft rule
+#: STRUCTURALLY. Deliberately NO write tool and NO evaluate tool — auto-apply is
+#: structurally impossible (B53); the only output is a validated draft for a
+#: human-reviewed migration.
+DRAFT_RULE_TOOLS = [
+    "regulation_watch_review",
+    "validate_draft_rule",
+    "threshold_in_force",
+    "lookup_glossary",
+    "explain_limitations",
+]
 
 
 def tool_definitions(names: list[str]) -> list[dict]:
