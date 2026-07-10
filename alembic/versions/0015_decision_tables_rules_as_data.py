@@ -264,6 +264,11 @@ SEED = [{'table_name': 'CAS_COVERAGE',
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite":  # pragma: no cover - SQLite-only for v1
+        raise NotImplementedError(
+            "port the append-only triggers to plpgsql before running on Postgres"
+        )
     op.create_table(
         "decision_tables",
         sa.Column("decision_table_id", sa.Integer(), primary_key=True),
@@ -334,21 +339,9 @@ def upgrade() -> None:
     op.bulk_insert(tables, table_rows)
     op.bulk_insert(rules, rule_rows)
 
-    if op.get_bind().dialect.name == "sqlite":
-        # plpgsql equivalents are created by migration 0017
-        for table in ("decision_tables", "decision_rules"):
-            for ddl in _append_only_ddl(table):
-                op.execute(sa.text(ddl))
-    else:
-        # the bulk insert supplied explicit decision_table_id values, which
-        # does not advance Postgres identity sequences — align them so the
-        # next ORM insert does not collide with the seeds
-        for table, pk in (("decision_tables", "decision_table_id"),
-                          ("decision_rules", "rule_id")):
-            op.execute(sa.text(
-                f"SELECT setval(pg_get_serial_sequence('{table}', '{pk}'), "
-                f"(SELECT COALESCE(MAX({pk}), 1) FROM {table}))"
-            ))
+    for table in ("decision_tables", "decision_rules"):
+        for ddl in _append_only_ddl(table):
+            op.execute(sa.text(ddl))
 
 
 def downgrade() -> None:

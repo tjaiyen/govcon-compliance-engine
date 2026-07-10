@@ -193,11 +193,9 @@ SYNTHETIC DATA — NOT FOR REGULATORY RELIANCE
 Known limitations this tool states about itself (handoff spec §4, verified
 regulatory reference §4):
 
-1. SEGREGATION OF DUTIES: every audited change is attributed to a named
-   actor (per request/operation, Phase 4), but that identity is ASSERTED —
-   a header, an environment variable, an OS login — not authenticated.
-   Attribution is not segregation of duties: without a real identity
-   provider in front of a deployment, one person can still claim any role.
+1. SEGREGATION OF DUTIES: this is a single-user tool. It can model and
+   document SoD concepts, but cannot itself provide segregation of duties —
+   one person controls every role, including the audit trail's session id.
 2. DESIGN vs. OPERATION: SF 1408 is a DESIGN review. Passing this tool's
    self-check demonstrates the design criteria are understood and modeled;
    it says nothing about adequacy in extended operation (the post-award
@@ -212,19 +210,6 @@ regulatory reference §4):
    criteria. A secondary source claims 14; that conflict is documented,
    unresolved, and must be settled against DCAA's actual current SF 1408
    checklist before extending this suite.
-6. REGULATION WATCH IS A SUGGESTER: the Federal Register watcher records
-   search results as suggestions for a HUMAN to verify — it never changes
-   a threshold or rule itself (parsing regulation is fragile; every change
-   lands as a reviewed migration), and a suggestion is not a legal
-   conclusion.
-7. AI ASSISTANT IS A RENDERING, NOT A DETERMINATION: the conversational /
-   tutor / drafting layer translates plain English to and from the engine's
-   structured inputs and explains results. It never makes a compliance
-   determination — the structured determination (tier, reasons, caveats,
-   provenance, citation) is the authoritative, audited fact. AI prose is
-   verified to cite only engine-produced values, is withheld when it cannot
-   be verified, and is never itself a system-of-record entry. The AI layer
-   runs on SYNTHETIC data only (fail-closed).
 """
 
 

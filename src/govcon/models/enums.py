@@ -51,17 +51,6 @@ class ThresholdStatus(str, enum.Enum):
     CARRY_FORWARD = "carry_forward"
 
 
-class SuggestionStatus(str, enum.Enum):
-    """Regulation-watch suggestion workflow (Phase 3): a fetched search
-    result starts NEW; a human marks it REVIEWED (verified relevant, action
-    tracked elsewhere e.g. a migration) or DISMISSED (not relevant). Rows
-    are never deleted - dismissals stay as history."""
-
-    NEW = "new"
-    REVIEWED = "reviewed"
-    DISMISSED = "dismissed"
-
-
 class CostType(str, enum.Enum):
     DIRECT = "direct"
     INDIRECT = "indirect"

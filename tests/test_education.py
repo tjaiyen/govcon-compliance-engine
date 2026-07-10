@@ -155,20 +155,6 @@ def test_determinations_expose_decision_table_provenance(session_factory):
 # --- the guided UI carries the education layer ----------------------------------
 
 
-def test_index_escapes_quotes_and_guards_external_url_sink(session_factory):
-    """XSS hardening (stress test): esc() must neutralize quotes (attribute
-    context), and the ONE sink that renders an external, fetched URL into an
-    href must go through safeUrl() (scheme allow-list), not bare esc()."""
-    c = client(session_factory)
-    html = c.get("/").text
-    assert '.replace(/"/g,"&quot;")' in html  # esc now escapes quotes
-    assert "function safeUrl(" in html
-    # the suggestions href — the untrusted-URL sink — uses safeUrl, not esc
-    import re
-    m = re.search(r'href="[^"]*\+\s*(\w+)\(sg\.url\)', html)
-    assert m and m.group(1) == "safeUrl", "external URL sink must use safeUrl()"
-
-
 def test_index_has_personas_scenarios_glossary_and_tristate(session_factory):
     c = client(session_factory)
     html = c.get("/").text

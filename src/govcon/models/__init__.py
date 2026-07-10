@@ -26,7 +26,6 @@ from govcon.models.reference import (
 from govcon.models.regulatory import RegulatoryThreshold
 from govcon.models.standard_costing import CostVariance, OverheadBudget, StandardCost
 from govcon.models.tina import TINABaseline, TINABaselineAssumption, TINASweepFinding
-from govcon.models.watch import RegulatorySuggestion
 
 __all__ = [
     "AuditAlertLog",
@@ -59,7 +58,6 @@ __all__ = [
     "RateTrueUp",
     "REACDAAction",
     "REACDALineItem",
-    "RegulatorySuggestion",
     "RegulatoryThreshold",
     "StandardCost",
     "TINABaseline",

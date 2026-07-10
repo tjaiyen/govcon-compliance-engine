@@ -10,23 +10,15 @@ completely untouched by the browsing/what-if UI.
 from __future__ import annotations
 
 import datetime
-import threading
-from collections import OrderedDict
 from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from govcon.core.identity import (
-    current_actor,
-    reset_actor,
-    sanitize_actor_label,
-    set_actor,
-)
 from govcon.db.engine import make_engine, make_session_factory
 from govcon.models import Contract, ContractAction
 from govcon.models.enums import (
@@ -75,23 +67,9 @@ def _money(raw: str) -> Decimal:
         raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
 
 
-class AskRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
-
-
-def create_app(session_factory=None, workspace_registry=None, llm_client=None) -> FastAPI:
+def create_app(session_factory=None) -> FastAPI:
     """Build the app. ``session_factory`` is injectable for tests; otherwise it
-    is derived from ``GOVCON_DB_URL`` (via make_engine).
-
-    ``workspace_registry`` (Phase 4) enables per-request workspace routing:
-    an ``X-Govcon-Workspace`` header selects an isolated workspace database
-    (see govcon.workspaces — physical isolation, deliberately not RLS).
-    Without a registry, or without the header, the default factory serves —
-    fully backward compatible.
-
-    ``llm_client`` (AI layer) enables the grounded assistant endpoints. Inject a
-    FakeLLMClient in tests; pass None (default) and the AI endpoints report
-    unavailable — the engine runs with zero AI configuration."""
+    is derived from ``GOVCON_DB_URL`` (via make_engine)."""
     factory = session_factory or make_session_factory(make_engine())
     app = FastAPI(
         title="GovCon Compliance Workbench",
@@ -101,122 +79,10 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         ),
         version="0.1.0",
     )
-    # Bounded engine cache (one connection pool per workspace); an LRU cap +
-    # lock stop unbounded pool growth and a check-then-build race across the
-    # sync-endpoint threadpool.
-    workspace_factories: OrderedDict[str, object] = OrderedDict()
-    workspace_lock = threading.Lock()
-    _MAX_CACHED_WORKSPACES = 32
 
-    @app.middleware("http")
-    async def _attribute_request(request: Request, call_next):
-        # Asserted identity (stated limitation): a header names the actor;
-        # authentication is a deployment concern in front of this app. The
-        # value is sanitized + length-capped before it reaches the immutable
-        # audit trail (it is untrusted input).
-        user = sanitize_actor_label(request.headers.get("x-govcon-user"))
-        token = set_actor(f"web:{user}" if user else "web:anonymous")
-        try:
-            return await call_next(request)
-        finally:
-            reset_actor(token)
-
-    def _factory_for(request: Request):
-        name = request.headers.get("x-govcon-workspace")
-        if not name or workspace_registry is None:
-            return factory
-        with workspace_lock:
-            cached = workspace_factories.get(name)
-            if cached is not None:
-                workspace_factories.move_to_end(name)
-                return cached
-            try:
-                if not workspace_registry.exists(name):
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"no workspace {name!r} — create it with "
-                        "`govcon workspace create`",
-                    )
-            except ValueError as exc:  # hostile/invalid name — never a path
-                raise HTTPException(status_code=422, detail=str(exc)) from None
-            built = make_session_factory(make_engine(workspace_registry.url(name)))
-            workspace_factories[name] = built
-            if len(workspace_factories) > _MAX_CACHED_WORKSPACES:
-                _, evicted = workspace_factories.popitem(last=False)
-                evicted.kw["bind"].dispose()  # close the evicted pool
-            return built
-
-    def get_session(request: Request) -> Iterator[Session]:
-        with _factory_for(request)() as session:
+    def get_session() -> Iterator[Session]:
+        with factory() as session:
             yield session
-
-    @app.get("/api/whoami")
-    def whoami(request: Request) -> dict:
-        """Who the engine will attribute this request's actions to, and which
-        isolated workspace it is routed at. Deliberately does NOT enumerate
-        other workspaces — that would leak tenant identities across the very
-        isolation boundary this feature enforces (enumeration is CLI-only,
-        `govcon workspace list`, gated by local shell access)."""
-        requested = request.headers.get("x-govcon-workspace")
-        if workspace_registry is None:
-            workspace = "default"
-        elif requested:
-            # only confirm the caller's OWN workspace, never list the rest
-            try:
-                workspace = requested if workspace_registry.exists(requested) else "unknown"
-            except ValueError:
-                workspace = "invalid"
-        else:
-            workspace = "default"
-        return {
-            "actor": current_actor(),
-            "workspace": workspace,
-            "routing_enabled": workspace_registry is not None,
-        }
-
-    # ------------------------------------------------------------ AI assistant
-    @app.post("/api/ask")
-    def ask(
-        req: AskRequest, request: Request, session: Session = Depends(get_session)
-    ) -> dict:
-        """Conversational query (Pattern 1): a plain-English question → the AI
-        calls the deterministic engine as tools → a grounded answer that ALWAYS
-        returns the authoritative determination beside the prose. The AI never
-        makes the determination; unverified prose is withheld."""
-        if llm_client is None:
-            return {"ai_available": False, "reason": "AI is not configured on this server"}
-        from govcon.ai.errors import CostCeilingError, SyntheticGateError
-        from govcon.ai.gate import assert_synthetic
-        from govcon.ai.patterns import ask as run_ask
-
-        try:
-            assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
-        except SyntheticGateError as exc:
-            return {"ai_available": False, "reason": str(exc)}
-        try:
-            result = run_ask(
-                llm_client,
-                session,
-                req.question,
-                actor=current_actor(),
-                workspace=request.headers.get("x-govcon-workspace") or "default",
-            )
-        except CostCeilingError as exc:
-            return {"ai_available": True, "error": str(exc)}
-        return {
-            "ai_available": True,
-            "prose": result.prose,
-            "determinations": result.determinations,
-            "grounding": {
-                "verified": result.grounding.verified,
-                "violations": result.grounding.violations,
-            },
-            "cost": result.cost.as_dict(),
-            "notice": (
-                "Advisory rendering over synthetic data. The structured "
-                "determination above is the authoritative result."
-            ),
-        }
 
     # ---------------------------------------------------------------- the UI
     @app.get("/", response_class=HTMLResponse)
@@ -324,47 +190,6 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 {"kind": i.kind, "due": i.due, "description": i.description}
                 for i in items
             ],
-        }
-
-    @app.get("/api/suggestions")
-    def suggestions(session: Session = Depends(get_session)) -> dict:
-        """Regulation-watch inbox, read-only. Scanning (network + writes) and
-        reviewing stay CLI-only on purpose — the workbench never mutates."""
-        import sqlalchemy as sa
-
-        from govcon.models import RegulatorySuggestion
-
-        rows = (
-            session.execute(
-                sa.select(RegulatorySuggestion).order_by(
-                    RegulatorySuggestion.strong_match.desc(),
-                    RegulatorySuggestion.publication_date.desc(),
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return {
-            "suggestions": [
-                {
-                    "suggestion_id": r.suggestion_id,
-                    "watch_rule": r.watch_rule,
-                    "document_number": r.document_number,
-                    "doc_type": r.doc_type,
-                    "title": r.title,
-                    "publication_date": (
-                        None if r.publication_date is None
-                        else r.publication_date.isoformat()
-                    ),
-                    "effective_on": (
-                        None if r.effective_on is None else r.effective_on.isoformat()
-                    ),
-                    "url": r.url,
-                    "strong_match": r.strong_match,
-                    "status": r.status.value,
-                }
-                for r in rows
-            ]
         }
 
     # --------------------------------------------------------------- education

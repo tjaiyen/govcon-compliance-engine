@@ -22,19 +22,9 @@ rules_app = typer.Typer(
     help="Decision-table (rules-as-data) explorer — read-only; rule changes "
     "land as new table versions via migrations, never through the CLI."
 )
-watch_app = typer.Typer(
-    help="Regulation watch — a Federal Register suggester with a mandatory "
-    "human review step; it NEVER applies a change itself."
-)
-workspace_app = typer.Typer(
-    help="Isolated workspace databases (Phase 4 multi-tenancy: one workspace "
-    "= one database; physical isolation, not row-level policy)."
-)
 app.add_typer(db_app, name="db")
 app.add_typer(audit_app, name="audit")
 app.add_typer(rules_app, name="rules")
-app.add_typer(watch_app, name="watch")
-app.add_typer(workspace_app, name="workspace")
 
 
 @app.command()
@@ -273,160 +263,6 @@ def rules_show(
                 )
 
 
-@watch_app.command("scan")
-def watch_scan(
-    since: str = typer.Option(
-        None, help="Fetch documents published on/after this ISO date "
-        "(default: 90 days back)."
-    ),
-) -> None:
-    """Scan the Federal Register for the engine's watch targets and record
-    NEW suggestions for human review. Suggest-only: applying a change is
-    always a verified migration, never this command."""
-    import datetime
-
-    from govcon.db.engine import make_engine, make_session_factory
-    from govcon.services.regulation_watch import scan
-
-    since_date = datetime.date.fromisoformat(since) if since else None
-    factory = make_session_factory(make_engine())
-    with factory() as session:
-        result = scan(session, since=since_date)
-        session.commit()
-    typer.echo(
-        f"scanned {len(result.targets)} watch target(s) since "
-        f"{result.since.isoformat()}: {len(result.new_suggestions)} new, "
-        f"{result.already_known} already known"
-    )
-    for u in result.unavailable:
-        typer.echo(f"[unavailable] {u['watch_rule']}: {u['error']}", err=True)
-    for t in result.truncated:
-        typer.echo(
-            f"[truncated] {t['watch_rule']}: {t['total']} matches, first "
-            f"{t['recorded']} recorded — narrow with --since",
-            err=True,
-        )
-    for name in result.skipped_unmapped:
-        typer.echo(f"[unmapped] {name}: no search term configured — add one "
-                   "to WATCH_TERMS", err=True)
-    typer.echo("suggestions are search results, not determinations — review "
-               "with `govcon watch list` / `govcon watch review`")
-
-
-@watch_app.command("list")
-def watch_list(
-    all: bool = typer.Option(False, "--all", help="Include reviewed/dismissed."),
-) -> None:
-    """List regulation-watch suggestions (default: NEW only)."""
-    import sqlalchemy as sa
-
-    from govcon.db.engine import make_engine, make_session_factory
-    from govcon.models import RegulatorySuggestion
-    from govcon.models.enums import SuggestionStatus
-
-    factory = make_session_factory(make_engine())
-    with factory() as session:
-        stmt = sa.select(RegulatorySuggestion).order_by(
-            RegulatorySuggestion.strong_match.desc(),
-            RegulatorySuggestion.publication_date.desc(),
-        )
-        if not all:
-            stmt = stmt.where(RegulatorySuggestion.status == SuggestionStatus.NEW)
-        rows = session.execute(stmt).scalars().all()
-        if not rows:
-            typer.echo("no suggestions" + ("" if all else " with status=new"))
-            return
-        for r in rows:
-            mark = "STRONG" if r.strong_match else "weak  "
-            eff = f" effective {r.effective_on.isoformat()}" if r.effective_on else ""
-            typer.echo(
-                f"#{r.suggestion_id} [{r.status.value}] [{mark}] "
-                f"{r.watch_rule} — {r.doc_type or 'Document'} "
-                f"{r.document_number} ({r.publication_date}){eff}"
-            )
-            typer.echo(f"    {r.title}")
-            if r.url:
-                typer.echo(f"    {r.url}")
-
-
-@watch_app.command("review")
-def watch_review(
-    suggestion_id: int,
-    reviewed: bool = typer.Option(False, "--reviewed", help="Mark verified-relevant."),
-    dismiss: bool = typer.Option(False, "--dismiss", help="Mark not relevant."),
-    note: str = typer.Option(None, help="Why — recorded on the row."),
-) -> None:
-    """Record the human verdict on a suggestion. This changes ONLY the
-    suggestion row — applying a regulatory change is always a migration."""
-    from govcon.db.engine import make_engine, make_session_factory
-    from govcon.models.enums import SuggestionStatus
-    from govcon.services.regulation_watch import review_suggestion
-
-    if reviewed == dismiss:
-        typer.echo("choose exactly one of --reviewed / --dismiss", err=True)
-        raise typer.Exit(code=2)
-    status = SuggestionStatus.REVIEWED if reviewed else SuggestionStatus.DISMISSED
-    factory = make_session_factory(make_engine())
-    with factory() as session:
-        try:
-            row = review_suggestion(session, suggestion_id, status=status, note=note)
-        except LookupError as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(code=1) from None
-        session.commit()
-        typer.echo(f"#{row.suggestion_id} -> {row.status.value}")
-
-
-@workspace_app.command("create")
-def workspace_create(name: str) -> None:
-    """Create a workspace: a fresh database built by the REAL migrations
-    (triggers + threshold/decision-table seeds included)."""
-    from govcon.workspaces import WorkspaceRegistry
-
-    registry = WorkspaceRegistry()
-    try:
-        path = registry.create(name)
-    except (ValueError, FileExistsError) as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=2) from None
-    except RuntimeError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from None
-    typer.echo(f"workspace {name!r} created at {path}")
-    typer.echo(f"use it: GOVCON_DB_URL=sqlite:///{path} govcon ... "
-               f"(or the X-Govcon-Workspace header under `govcon serve --workspaces`)")
-
-
-@workspace_app.command("list")
-def workspace_list() -> None:
-    """List workspaces under $GOVCON_HOME/workspaces."""
-    from govcon.workspaces import WorkspaceRegistry
-
-    registry = WorkspaceRegistry()
-    names = registry.list()
-    if not names:
-        typer.echo("no workspaces — create one with `govcon workspace create <name>`")
-        return
-    for name in names:
-        typer.echo(f"{name}  {registry.path(name)}")
-
-
-@workspace_app.command("path")
-def workspace_path(name: str) -> None:
-    """Print a workspace's database path (for GOVCON_DB_URL wiring)."""
-    from govcon.workspaces import WorkspaceRegistry
-
-    registry = WorkspaceRegistry()
-    try:
-        if not registry.exists(name):
-            typer.echo(f"no workspace {name!r}", err=True)
-            raise typer.Exit(code=1)
-        typer.echo(str(registry.path(name)))
-    except ValueError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=2) from None
-
-
 @db_app.command("upgrade")
 def db_upgrade() -> None:
     """Run alembic upgrade head against GOVCON_DB_URL."""
@@ -460,12 +296,6 @@ def serve(
         "--demo",
         help="Spin up a fresh, migrated (threshold-seeded) SQLite DB for a "
         "zero-setup demo, instead of using GOVCON_DB_URL.",
-    ),
-    workspaces: bool = typer.Option(
-        False,
-        "--workspaces",
-        help="Enable per-request workspace routing via the "
-        "X-Govcon-Workspace header (see `govcon workspace`).",
     ),
 ) -> None:
     """Run the guided web workbench (advisory, synthetic data) on localhost.
@@ -501,31 +331,8 @@ def serve(
 
     from govcon.api import create_app
 
-    registry = None
-    if workspaces:
-        from govcon.workspaces import WorkspaceRegistry
-
-        registry = WorkspaceRegistry()
-        typer.echo(
-            f"workspace routing ON — X-Govcon-Workspace header selects one of: "
-            f"{registry.list() or '(none yet)'}"
-        )
-    # AI assistant: enabled only if the ai extra + ANTHROPIC_API_KEY are present
-    # AND data mode is synthetic (fail-closed). Absent → the AI endpoints report
-    # unavailable and the workbench runs unchanged.
-    from govcon.ai import default_client_or_none
-    from govcon.ai.gate import is_synthetic
-
-    llm_client = default_client_or_none() if is_synthetic() else None
-    typer.echo(
-        f"AI assistant: {'ON (synthetic-data only)' if llm_client else 'off (no key / non-synthetic mode)'}"
-    )
     typer.echo(f"GovCon workbench (synthetic data) → http://{host}:{port}")
-    uvicorn.run(
-        create_app(workspace_registry=registry, llm_client=llm_client),
-        host=host,
-        port=port,
-    )
+    uvicorn.run(create_app(), host=host, port=port)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess

@@ -19,12 +19,8 @@ def test_money_roundtrips_exactly(session):
         ),
         {"tid": data.txn_direct.transaction_id},
     ).scalar()
-    # Raw column value is each backend's exact canon, no float artifacts:
-    # canonical TEXT on SQLite, native NUMERIC (Decimal) on Postgres.
-    if session.get_bind().dialect.name == "postgresql":
-        assert stored == Decimal("1250.00") and isinstance(stored, Decimal)
-    else:
-        assert stored == "1250.00"
+    # Raw column value is canonical TEXT, no float artifacts.
+    assert stored == "1250.00"
     session.expire_all()
     reloaded = session.get(type(data.txn_direct), data.txn_direct.transaction_id)
     assert reloaded.amount == Decimal("1250.00")

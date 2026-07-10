@@ -11,9 +11,7 @@ Chain design:
 - audit rows are written with a Core insert, which does not re-enter ORM
   flush events (no recursion).
 - SQLite's single-writer serializes the read-last-hash/insert pair; on
-  Postgres a transaction-scoped advisory lock (AUDIT_CHAIN_LOCK_KEY)
-  serializes it explicitly, so two concurrent flushes cannot fork the
-  chain (probed by a real two-connection test).
+  Postgres this section would need an advisory lock.
 """
 
 from __future__ import annotations
@@ -23,21 +21,19 @@ import enum
 import hashlib
 import json
 from decimal import Decimal
+from uuid import uuid4
 
 import sqlalchemy as sa
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from govcon.core.identity import current_actor
 from govcon.models import AuditTrail
 
 GENESIS_HASH = "0" * 64
 AUDIT_EXEMPT = {"audit_trail"}
 
-#: One constant advisory-lock key for the whole audit chain on Postgres —
-#: pg_advisory_xact_lock holds it until the surrounding transaction ends,
-#: which covers the read-last-hash/insert pair exactly.
-AUDIT_CHAIN_LOCK_KEY = 831_415_926
+#: Single-user tool — a per-process session identifier is sufficient (§0.1).
+SESSION_ID = uuid4().hex
 
 
 def _canon_default(value):
@@ -120,13 +116,10 @@ def write_audit_rows(session: Session, _ctx) -> None:
     changes = _collect_changes(session)
     if not changes:
         return
-    if session.get_bind().dialect.name == "postgresql":
-        session.execute(sa.select(sa.func.pg_advisory_xact_lock(AUDIT_CHAIN_LOCK_KEY)))
     prev = session.execute(
         sa.select(AuditTrail.entry_hash).order_by(AuditTrail.trail_id.desc()).limit(1)
     ).scalar()
     prev = prev or GENESIS_HASH
-    actor = current_actor()  # resolved once per flush — one flush, one actor
     for table, record_id, action, old, new in changes:
         timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         payload = {
@@ -135,7 +128,7 @@ def write_audit_rows(session: Session, _ctx) -> None:
             "action": action,
             "old_values": old,
             "new_values": new,
-            "user_id": actor,
+            "user_id": SESSION_ID,
             "timestamp": timestamp,
             "previous_entry_hash": prev,
         }
@@ -147,7 +140,7 @@ def write_audit_rows(session: Session, _ctx) -> None:
                 action=action,
                 old_values=None if old is None else canonical_json(old),
                 new_values=None if new is None else canonical_json(new),
-                user_id=actor,
+                user_id=SESSION_ID,
                 timestamp=timestamp,
                 previous_entry_hash=prev,
                 entry_hash=entry_hash,
@@ -166,14 +159,10 @@ def verify_audit_chain(session: Session) -> tuple[bool, int | None]:
     # Contiguity check (a stress test noted mid-chain row deletion was
     # undetectable): trail_ids are a gapless 1..N sequence, so a gap means a
     # row was deleted out of band even if the surviving rows still hash-link.
-    # SQLite-only: Postgres sequences legitimately skip on rolled-back
-    # transactions, so there the belt is the hash linkage below plus the
-    # DB-level no-delete trigger (0017) — a documented, deliberate split.
-    check_gaps = session.get_bind().dialect.name == "sqlite"
     count, max_id = session.execute(
         sa.select(sa.func.count(AuditTrail.trail_id), sa.func.max(AuditTrail.trail_id))
     ).one()
-    if check_gaps and count and max_id != count:
+    if count and max_id != count:
         # find the first missing id for the report
         present = set(
             session.execute(sa.select(AuditTrail.trail_id)).scalars()

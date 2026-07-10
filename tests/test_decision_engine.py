@@ -185,29 +185,6 @@ def test_on_first_use_resolves_whole_context_as_a_unit(session):
     assert len(ev.caveats) == 2  # both post-NDAA rows are statute → 2 caveats
 
 
-def test_reason_template_cannot_traverse_attributes_or_inject(session):
-    """The reason renderer is a plain {name} substitution, NOT str.format —
-    a template can never reach object internals ({x.__class__...}), even from
-    a malicious/buggy rule row, and an unknown name / stray brace fails loud."""
-    t = _mk_table(session, name="TPL", initial={})
-    _mk_rule(session, t, 1, "traverse", when=None, outcome={},
-             reason="cls={x.__class__}")
-    with pytest.raises(ValueError, match="unmatched brace|unavailable name"):
-        evaluate_table(session, "TPL", D(2026, 1, 1), {"x": 5})
-
-    t2 = _mk_table(session, name="TPL2", initial={})
-    _mk_rule(session, t2, 1, "unknown", when=None, outcome={},
-             reason="value is {ghost}")
-    with pytest.raises(ValueError, match="unavailable name"):
-        evaluate_table(session, "TPL2", D(2026, 1, 1), {"x": 5})
-
-    t3 = _mk_table(session, name="TPL3", initial={})
-    _mk_rule(session, t3, 1, "ok", when=None, outcome={},
-             reason="value is {x} dollars")
-    ev = evaluate_table(session, "TPL3", D(2026, 1, 1), {"x": 42})
-    assert ev.reasons == ["value is 42 dollars"]
-
-
 def test_non_final_rule_status_emits_provenance_caveat(session):
     from govcon.models.enums import ThresholdStatus
 

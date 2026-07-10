@@ -60,25 +60,9 @@ def _status_type(values: Sequence[str]) -> sa.Enum:
 
 def _rebuild_status_check(old_values: Sequence[str], new_values: Sequence[str]) -> None:
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        # Non-native enum = a named CHECK constraint (naming convention
-        # ck_<table>_<enum name>, verified live on PG 17). Postgres can swap
-        # it in place — no table rebuild, no trigger dance (the plpgsql
-        # triggers from 0017 are unaffected by constraint DDL).
-        values = ", ".join(f"'{v}'" for v in new_values)
-        op.execute(sa.text(
-            "ALTER TABLE regulatory_thresholds "
-            "DROP CONSTRAINT IF EXISTS ck_regulatory_thresholds_threshold_status"
-        ))
-        op.execute(sa.text(
-            "ALTER TABLE regulatory_thresholds "
-            "ADD CONSTRAINT ck_regulatory_thresholds_threshold_status "
-            f"CHECK (status IN ({values}))"
-        ))
-        return
-    if bind.dialect.name != "sqlite":  # pragma: no cover - unknown dialect
+    if bind.dialect.name != "sqlite":  # pragma: no cover - SQLite-only for v1
         raise NotImplementedError(
-            "threshold_status CHECK rebuild implemented for sqlite/postgresql only"
+            "port the threshold_status CHECK change to a Postgres ALTER TYPE first"
         )
     for name in (
         "trg_regulatory_thresholds_no_update",

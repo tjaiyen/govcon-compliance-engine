@@ -76,14 +76,8 @@ def test_chain_verifies_and_detects_tamper(session, engine):
     victim = session.execute(
         sa.select(AuditTrail.trail_id).order_by(AuditTrail.trail_id).offset(2).limit(1)
     ).scalar_one()
-    drop = ("DROP TRIGGER trg_audit_trail_no_update ON audit_trail"
-            if engine.dialect.name == "postgresql"
-            else "DROP TRIGGER trg_audit_trail_no_update")
-    # release the ORM session's open transaction: on Postgres its share lock
-    # on audit_trail would deadlock the out-of-band DDL below
-    session.rollback()
     with engine.connect() as conn:
-        conn.execute(sa.text(drop))
+        conn.execute(sa.text("DROP TRIGGER trg_audit_trail_no_update"))
         conn.execute(
             sa.text("UPDATE audit_trail SET new_values = '{\"amount\":\"9999.99\"}' WHERE trail_id = :t"),
             {"t": victim},

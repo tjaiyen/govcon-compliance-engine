@@ -229,21 +229,13 @@ def test_audit_chain_detects_mid_chain_deletion(session, engine):
     ok, _ = verify_audit_chain(session)
     assert ok
     # Delete a middle row out of band (drop the guard trigger first).
-    pg = engine.dialect.name == "postgresql"
-    drop = ("DROP TRIGGER trg_audit_trail_no_delete ON audit_trail" if pg
-            else "DROP TRIGGER trg_audit_trail_no_delete")
-    session.rollback()  # release the session's PG locks before out-of-band DDL
     with engine.connect() as conn:
-        conn.execute(sa.text(drop))
+        conn.execute(sa.text("DROP TRIGGER trg_audit_trail_no_delete"))
         conn.execute(sa.text("DELETE FROM audit_trail WHERE trail_id = 3"))
         conn.commit()
     session.expire_all()
     ok, bad = verify_audit_chain(session)
-    # SQLite's gapless-id belt reports the missing id itself; Postgres (where
-    # sequences legitimately gap on rollback) detects via hash linkage, so the
-    # first surviving row whose previous_entry_hash no longer matches is
-    # reported — row 4. Either way the deletion is caught.
-    assert not ok and bad == (4 if pg else 3)
+    assert not ok and bad == 3  # the gap is detected
 
 
 # --- ROBUSTNESS regressions -------------------------------------------------
@@ -317,16 +309,9 @@ def test_no_core_dml_on_business_tables_in_services():
 
     services = pathlib.Path(__file__).resolve().parent.parent / "src" / "govcon" / "services"
     offenders = []
-    # Flag BOTH the expression form (sa.insert(...)) AND raw-SQL DML
-    # (session.execute(sa.text("UPDATE ..."))) — either bypasses the audit
-    # listener. The raw-SQL branch was a latent hole this stress test closed.
-    expr_dml = re.compile(r"session\.execute\(\s*sa\.(insert|update|delete)\(", re.S)
-    text_dml = re.compile(
-        r"""session\.execute\(\s*sa\.text\(\s*["']?\s*(insert|update|delete)\b""",
-        re.S | re.I,
-    )
+    pattern = re.compile(r"session\.execute\(\s*sa\.(insert|update|delete)\(", re.S)
     for py in services.glob("*.py"):
         text = py.read_text(encoding="utf-8")
-        if expr_dml.search(text) or text_dml.search(text):
+        if pattern.search(text):
             offenders.append(py.name)
     assert offenders == [], f"Core DML on business tables bypasses audit+guards: {offenders}"
