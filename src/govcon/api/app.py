@@ -1,0 +1,193 @@
+"""FastAPI application factory + endpoints (Phase 0).
+
+The endpoints construct *transient* (unsaved) model objects from the request
+and hand them to the pure service functions — the determinations are read-only
+(they look up seeded regulatory thresholds and compute), so nothing is
+persisted. This keeps the write path (append-only ledger, audit chain)
+completely untouched by the browsing/what-if UI.
+"""
+
+from __future__ import annotations
+
+import datetime
+from collections.abc import Iterator
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+
+from fastapi import Depends, FastAPI
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from govcon.db.engine import make_engine, make_session_factory
+from govcon.models import Contract, ContractAction
+from govcon.models.enums import (
+    AgencyType,
+    CASCoverageType,
+    ContractActionType,
+    ContractorSize,
+)
+from govcon.services.cas_tina import (
+    determine_cas_coverage,
+    determine_tina_applicability,
+)
+from govcon.services.reverification import reverification_items
+from govcon.services.sf1408 import explain_limitations, has_data, run_self_check
+from govcon.services.thresholds import threshold_in_force
+
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+# --------------------------------------------------------------- request models
+class CASRequest(BaseModel):
+    award_date: datetime.date
+    contract_value: str = Field(..., description="Decimal string, e.g. '12000000.00'")
+    contractor_size: ContractorSize = ContractorSize.OTHER_THAN_SMALL
+    is_nontraditional_dc: bool = False
+    agency_type: AgencyType = AgencyType.DOD
+
+
+class TINARequest(BaseModel):
+    action_date: datetime.date
+    proposed_value: str = Field(..., description="Decimal string")
+    tina_exception_adequate_price_competition: bool = False
+    tina_exception_commercial_product_service: bool = False
+    tina_exception_prices_set_by_law: bool = False
+    tina_exception_waiver_granted: bool = False
+
+
+def _money(raw: str) -> Decimal:
+    try:
+        return Decimal(raw)
+    except (InvalidOperation, TypeError) as exc:  # pragma: no cover - guard
+        raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
+
+
+def create_app(session_factory=None) -> FastAPI:
+    """Build the app. ``session_factory`` is injectable for tests; otherwise it
+    is derived from ``GOVCON_DB_URL`` (via make_engine)."""
+    factory = session_factory or make_session_factory(make_engine())
+    app = FastAPI(
+        title="GovCon Compliance Workbench",
+        description=(
+            "Advisory decision-support & training tool on SYNTHETIC data. "
+            "Not a certified accounting system; see /api/about."
+        ),
+        version="0.1.0",
+    )
+
+    def get_session() -> Iterator[Session]:
+        with factory() as session:
+            yield session
+
+    # ---------------------------------------------------------------- the UI
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        return (_WEB_DIR / "index.html").read_text(encoding="utf-8")
+
+    # ------------------------------------------------------------ determinations
+    @app.post("/api/cas")
+    def cas(req: CASRequest, session: Session = Depends(get_session)) -> dict:
+        contract = Contract(
+            award_date=req.award_date,
+            contract_value=_money(req.contract_value),
+            contractor_size=req.contractor_size,
+            is_nontraditional_dc=req.is_nontraditional_dc,
+            agency_type=req.agency_type,
+            cas_coverage_type=CASCoverageType.NONE,
+        )
+        try:
+            d = determine_cas_coverage(session, contract)
+        except LookupError as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "tier": d.tier,
+            "requires_review": d.requires_review,
+            "disclosure_required": d.disclosure_required,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+        }
+
+    @app.post("/api/tina")
+    def tina(req: TINARequest, session: Session = Depends(get_session)) -> dict:
+        action = ContractAction(
+            action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
+            action_date=req.action_date,
+            proposed_value=_money(req.proposed_value),
+            tina_exception_adequate_price_competition=(
+                req.tina_exception_adequate_price_competition
+            ),
+            tina_exception_commercial_product_service=(
+                req.tina_exception_commercial_product_service
+            ),
+            tina_exception_prices_set_by_law=req.tina_exception_prices_set_by_law,
+            tina_exception_waiver_granted=req.tina_exception_waiver_granted,
+        )
+        try:
+            d = determine_tina_applicability(session, action)
+        except LookupError as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "threshold_value": str(d.threshold_value),
+            "above_threshold": d.above_threshold,
+            "certification_required": d.certification_required,
+            "exception_applied": d.exception_applied,
+            "unevaluated_exceptions": d.unevaluated_exceptions,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+        }
+
+    @app.get("/api/threshold")
+    def threshold(
+        rule: str, on: datetime.date, session: Session = Depends(get_session)
+    ) -> dict:
+        try:
+            row = threshold_in_force(session, rule, on)
+        except LookupError as exc:
+            return {"in_force": False, "message": str(exc)}
+        return {
+            "in_force": True,
+            "rule_name": row.rule_name,
+            "value": None if row.value is None else str(row.value),
+            "effective_date": (
+                None if row.effective_date is None else row.effective_date.isoformat()
+            ),
+            "status": row.status.value,
+            "source_citation": row.source_citation,
+        }
+
+    @app.get("/api/sf1408")
+    def sf1408(session: Session = Depends(get_session)) -> dict:
+        results = run_self_check(session)
+        return {
+            "has_data": has_data(session),
+            "criteria": [
+                {
+                    "criterion": r.criterion,
+                    "name": r.name,
+                    "passed": r.passed,
+                    "findings": r.findings,
+                }
+                for r in results
+            ],
+        }
+
+    @app.get("/api/reverify")
+    def reverify(session: Session = Depends(get_session)) -> dict:
+        as_of = datetime.date.today()
+        items = reverification_items(session, as_of)
+        return {
+            "as_of": as_of.isoformat(),
+            "items": [
+                {"kind": i.kind, "due": i.due, "description": i.description}
+                for i in items
+            ],
+        }
+
+    @app.get("/api/about", response_class=PlainTextResponse)
+    def about() -> str:
+        return explain_limitations()
+
+    return app
