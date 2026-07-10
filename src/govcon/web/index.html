@@ -299,6 +299,25 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <div class="result" id="r-cr" tabindex="-1" aria-live="polite" hidden></div>
   </section>
 
+  <!-- ============ FAR 31.205-10 / CAS 414 facilities capital cost of money ============ -->
+  <section class="card" id="fccm-card">
+    <p class="eyebrow-sm">Flow 01e &middot; Facilities capital cost of money (FAR 31.205-10 / CAS 414)</p>
+    <h2>Facilities capital cost of money (DD Form 1861)</h2>
+    <p class="sub">An allowable <em>imputed</em> cost for the capital tied up in facilities &mdash; not interest. Per pool: allocation base &times; the CASB-CMF factor (which embeds the Treasury cost-of-money rate). Advisory only.</p>
+    <form id="f-fccm">
+      <div class="grid" style="grid-template-columns: 1.2fr 1fr 1fr; align-items:end">
+        <div style="align-self:center"><b class="mono">Overhead</b></div>
+        <div><label for="fccm-oh-b">Allocation base</label><input id="fccm-oh-b" class="mono" inputmode="decimal" value="1000000"></div>
+        <div><label for="fccm-oh-f">CASB-CMF factor</label><input id="fccm-oh-f" class="mono" inputmode="decimal" value="0.00234"></div>
+        <div style="align-self:center"><b class="mono">G&amp;A</b></div>
+        <div><label for="fccm-ga-b">Allocation base</label><input id="fccm-ga-b" class="mono" inputmode="decimal" value="500000"></div>
+        <div><label for="fccm-ga-f">CASB-CMF factor</label><input id="fccm-ga-f" class="mono" inputmode="decimal" value="0.00110"></div>
+      </div>
+      <button type="submit">Compute cost of money</button>
+    </form>
+    <div class="result" id="r-fccm" tabindex="-1" aria-live="polite" hidden></div>
+  </section>
+
   <!-- ============ threshold explorer ============ -->
   <section class="card">
     <p class="eyebrow-sm">Flow 02 · See the rule</p>
@@ -571,6 +590,29 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
         return '<div class="watch-item"><span class="kind">' + esc(f.element) + "</span> proposed $" + esc(f.proposed) + " &rarr; probable $" + esc(f.probable) + (f.adjusted ? ' <span class="tag ' + tag + '">+$' + esc(f.adjustment) + "</span>" : "") + "</div>";
       }).join("");
       host.innerHTML = '<div class="verdict"><span class="tag ' + tag + '">15.404-1(d)</span><h3>Probable cost $' + esc(b.probable_cost) + " (" + esc(b.adjustment_pct) + "% vs proposed $" + esc(b.proposed_cost) + ")</h3>" + '<span class="mono muted">cost realism analysis: ' + esc(b.realism_status) + "</span></div>" + findings + teach(b.reasons, b.caveats, null);
+      host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+    }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine.</p>'; })
+      .then(function () { if (btn) btn.disabled = false; });
+  });
+
+  // ---- flow 01e: facilities capital cost of money (FAR 31.205-10 / CAS 414) ----
+  $("f-fccm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = e.target.querySelector('[type="submit"]'); if (btn) btn.disabled = true;
+    var rows = [
+      ["Overhead", "fccm-oh-b", "fccm-oh-f"],
+      ["G&A", "fccm-ga-b", "fccm-ga-f"],
+    ];
+    var pools = rows.map(function (r) {
+      return { name: r[0], allocation_base: parseMoney($(r[1]).value || "0"), cost_of_money_factor: ($(r[2]).value || "0") };
+    });
+    var host = $("r-fccm"); host.hidden = false; host.innerHTML = '<p class="muted">Computing cost of money…</p>';
+    post("/api/facilities-cost-of-money", { pools: pools }).then(function (b) {
+      if (!b.available) { host.innerHTML = '<p class="muted">' + esc(b.message || "Could not compute.") + "</p>"; return; }
+      var findings = (b.pool_findings || []).map(function (f) {
+        return '<div class="watch-item"><span class="kind">' + esc(f.pool) + '</span> $' + esc(f.allocation_base) + ' &times; ' + esc(f.cost_of_money_factor) + ' = $' + esc(f.cost_of_money) + '</div>';
+      }).join("");
+      host.innerHTML = '<div class="verdict"><span class="tag ok">31.205-10 / CAS 414</span><h3>Facilities capital cost of money $' + esc(b.total_cost_of_money) + '</h3>' + '<span class="mono muted">imputed cost &middot; DD Form 1861</span></div>' + findings + teach(b.reasons, b.caveats, null);
       host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
     }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine.</p>'; })
       .then(function () { if (btn) btn.disabled = false; });

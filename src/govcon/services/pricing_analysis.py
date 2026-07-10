@@ -473,3 +473,71 @@ def assess_cost_realism(
         reasons=reasons,
         caveats=caveats,
     )
+
+
+# ------------------- FAR 31.205-10 / CAS 414 (9904.414): facilities capital cost of money
+# Grounded: FCCM is an imputed cost, "not a form of interest on borrowings"
+# (FAR 31.205-10(a)(1)), allowable when measured/allocated per CAS 414 (31.205-10(b)).
+# CAS 9904.414-50(c)(3): the cost of capital committed to facilities is "the sum of the
+# products obtained by multiplying the amount of allocation base units … by the facilities
+# capital cost of money factor for the corresponding indirect cost pool" — i.e. the DD
+# Form 1861 / Form CASB-CMF computation. The factors themselves derive from the cost of
+# money rate, which per 9904.414-50(b) is "the arithmetic mean of the interest rates
+# specified by the Secretary of the Treasury pursuant to Public Law 92-41" — a dated
+# rate the engine takes as input (never a hard-coded scalar — ground rule 2).
+
+
+@dataclass
+class FacilitiesCostOfMoney:
+    total_cost_of_money: Decimal
+    pool_findings: list[dict] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    source_citation: str = "FAR 31.205-10 / CAS 9904.414-50"
+
+
+def compute_facilities_cost_of_money(*, pools: list[dict]) -> FacilitiesCostOfMoney:
+    """DD Form 1861 / CAS 9904.414-50(c)(3): facilities capital cost of money = the sum,
+    over each indirect-cost pool, of the contract's allocation-base amount in that pool
+    times the pool's facilities capital cost of money factor (from Form CASB-CMF). Pure;
+    the factor already embeds the Treasury cost-of-money rate, so no rate is hard-coded."""
+    cents = Decimal("0.01")
+    findings: list[dict] = []
+    total = Decimal(0)
+    for p in pools:
+        base = Decimal(str(p.get("allocation_base", "0")))
+        factor = Decimal(str(p.get("cost_of_money_factor", "0")))
+        fccm = (base * factor).quantize(cents)
+        total += fccm
+        findings.append({
+            "pool": str(p.get("name", "pool")),
+            "allocation_base": str(base.quantize(cents)),
+            "cost_of_money_factor": str(factor),
+            "cost_of_money": str(fccm),
+        })
+    total = total.quantize(cents)
+
+    reasons = [
+        "Facilities capital cost of money is the sum, over each indirect cost pool, of "
+        "the contract's allocation-base units times that pool's facilities capital cost "
+        "of money factor (CAS 9904.414-50(c)(3); DD Form 1861).",
+        f"Total facilities capital cost of money = ${total:,} across {len(findings)} "
+        "pool(s).",
+    ]
+    caveats = [
+        "FCCM is an imputed cost — NOT a form of interest on borrowings "
+        "(FAR 31.205-10(a)(1)); it is an allowable cost element, distinct from the "
+        "weighted-guidelines facilities-capital PROFIT factor (DFARS 215.404-71-4).",
+        "Each pool factor derives from the cost of money rate — the arithmetic mean of "
+        "the Treasury interest rates under Public Law 92-41 (CAS 9904.414-50(b)) — applied "
+        "to the net book value of facilities capital (Form CASB-CMF); supply the factor in "
+        "force for the period, never a hard-coded rate.",
+        "Allowable only when specifically identified and proposed, and measured/allocated "
+        "per CAS 414 and FAR 31.205-52 (FAR 31.205-10(b)).",
+    ]
+    return FacilitiesCostOfMoney(
+        total_cost_of_money=total,
+        pool_findings=findings,
+        reasons=reasons,
+        caveats=caveats,
+    )

@@ -105,6 +105,16 @@ class CostRealismRequest(BaseModel):
     cost_elements: list[CostElement] = Field(..., min_length=1)
 
 
+class FccmPool(BaseModel):
+    name: str = "pool"
+    allocation_base: str = Field(..., description="Contract's allocation-base amount in this pool (USD)")
+    cost_of_money_factor: str = Field(..., description="Facilities capital cost of money factor from Form CASB-CMF (decimal)")
+
+
+class FccmRequest(BaseModel):
+    pools: list[FccmPool] = Field(..., min_length=1)
+
+
 #: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
 #: raise from Decimal.quantize downstream) — shared bound with the AI registry.
 _MAX_MONEY = Decimal("1e15")
@@ -835,6 +845,31 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             "total_adjustment": str(d.total_adjustment),
             "adjustment_pct": str(d.adjustment_pct),
             "element_findings": d.element_findings,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+            "source_citation": d.source_citation,
+        }
+
+    @app.post("/api/facilities-cost-of-money")
+    def facilities_cost_of_money(req: FccmRequest) -> dict:
+        """FAR 31.205-10 / CAS 9904.414-50(c)(3): facilities capital cost of money
+        (DD Form 1861) — the sum over indirect-cost pools of allocation base times
+        the pool's CASB-CMF factor. An allowable imputed cost, not interest."""
+        from govcon.services.pricing_analysis import compute_facilities_cost_of_money
+
+        try:
+            pools = [
+                {"name": p.name, "allocation_base": p.allocation_base,
+                 "cost_of_money_factor": p.cost_of_money_factor}
+                for p in req.pools
+            ]
+            d = compute_facilities_cost_of_money(pools=pools)
+        except (ValueError, InvalidOperation) as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "total_cost_of_money": str(d.total_cost_of_money),
+            "pool_findings": d.pool_findings,
             "reasons": d.reasons,
             "caveats": d.caveats,
             "source_citation": d.source_citation,

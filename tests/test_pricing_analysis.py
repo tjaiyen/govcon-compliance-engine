@@ -18,6 +18,7 @@ from govcon.models.enums import ContractActionType
 from govcon.services.pricing_analysis import (
     assess_cost_realism,
     compute_facilities_capital_profit,
+    compute_facilities_cost_of_money,
     compute_weighted_guidelines_profit,
     determine_price_or_cost_analysis,
     determine_subcontract_certified_data,
@@ -256,6 +257,33 @@ def test_api_cost_realism(session_factory):
         {"name": "material", "proposed": "50000"}]}).json()
     assert r["available"] and r["realism_status"] == "required"
     assert r["probable_cost"] == "170000.00" and r["total_adjustment"] == "20000.00"
+
+
+# ------------------------------------ FAR 31.205-10 / CAS 414 facilities cost of money
+def test_facilities_cost_of_money_sums_pool_products():
+    d = compute_facilities_cost_of_money(pools=[
+        {"name": "overhead", "allocation_base": "1000000", "cost_of_money_factor": "0.00234"},
+        {"name": "g&a", "allocation_base": "500000", "cost_of_money_factor": "0.00110"},
+    ])
+    # 1,000,000 × 0.00234 = 2,340 ; 500,000 × 0.00110 = 550 ; total = 2,890
+    assert d.total_cost_of_money == Decimal("2890.00")
+    oh = next(p for p in d.pool_findings if p["pool"] == "overhead")
+    assert oh["cost_of_money"] == "2340.00"
+
+
+def test_facilities_cost_of_money_is_imputed_not_interest_caveat():
+    d = compute_facilities_cost_of_money(pools=[
+        {"name": "overhead", "allocation_base": "1000000", "cost_of_money_factor": "0.001"}])
+    assert any("NOT a form of interest" in c for c in d.caveats)
+    assert any("Public Law 92-41" in c for c in d.caveats)
+
+
+def test_api_facilities_cost_of_money(session_factory):
+    c = TestClient(create_app(session_factory=session_factory))
+    r = c.post("/api/facilities-cost-of-money", json={"pools": [
+        {"name": "overhead", "allocation_base": "1000000", "cost_of_money_factor": "0.00234"},
+        {"name": "g&a", "allocation_base": "500000", "cost_of_money_factor": "0.00110"}]}).json()
+    assert r["available"] and r["total_cost_of_money"] == "2890.00"
 
 
 def test_workbench_has_far15_card(session_factory):

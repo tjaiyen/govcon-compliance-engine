@@ -250,6 +250,23 @@ def _run_cost_realism(session: Session, inp: dict) -> dict:
     }
 
 
+def _run_facilities_cost_of_money(session: Session, inp: dict) -> dict:
+    from govcon.services.pricing_analysis import compute_facilities_cost_of_money
+
+    try:
+        d = compute_facilities_cost_of_money(pools=list(inp.get("pools") or []))
+    except (ValueError, InvalidOperation, KeyError, TypeError) as exc:
+        return {"available": False, "message": str(exc)}
+    return {
+        "available": True,
+        "total_cost_of_money": str(d.total_cost_of_money),
+        "pool_findings": d.pool_findings,
+        "reasons": d.reasons,
+        "caveats": d.caveats,
+        "source_citation": d.source_citation,
+    }
+
+
 def _run_threshold(session: Session, inp: dict) -> dict:
     try:
         row = threshold_in_force(session, inp["rule"], _date(inp["on"]))
@@ -511,6 +528,36 @@ TOOLS: dict[str, ToolSpec] = {
             run=_run_cost_realism,
         ),
         ToolSpec(
+            name="compute_facilities_cost_of_money",
+            description=(
+                "FAR 31.205-10 / CAS 9904.414-50(c)(3): facilities capital cost of money "
+                "(DD Form 1861) — the sum over indirect-cost pools of each pool's allocation "
+                "base times its facilities capital cost of money factor (from Form CASB-CMF). "
+                "An allowable imputed cost, NOT interest, distinct from the weighted-guidelines "
+                "facilities-capital profit factor. pools is a list of {name, allocation_base, "
+                "cost_of_money_factor}."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "pools": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "allocation_base": {"type": "string"},
+                                "cost_of_money_factor": {"type": "string"},
+                            },
+                            "required": ["allocation_base", "cost_of_money_factor"],
+                        },
+                    },
+                },
+                "required": ["pools"],
+            },
+            run=_run_facilities_cost_of_money,
+        ),
+        ToolSpec(
             name="threshold_in_force",
             description=(
                 "Look up the dated regulatory threshold in force for a rule on a date, with its "
@@ -604,6 +651,7 @@ ASK_TOOLS = [
     "compute_weighted_guidelines_profit",
     "compute_facilities_capital_profit",
     "assess_cost_realism",
+    "compute_facilities_cost_of_money",
     "threshold_in_force",
     "run_self_check",
     "reverification_items",

@@ -313,4 +313,24 @@ GLOSSARY: list[dict] = [
             "probable cost and reports the adjustment."
         ),
     ),
+    dict(
+        term="facilities capital cost of money (FCCM, FAR 31.205-10 / CAS 414)",
+        plain=(
+            "An imputed charge for the money a contractor has tied up in its "
+            "buildings and equipment — a bookkeeping cost of that investment, not "
+            "interest on a loan and not a payment to anyone."
+        ),
+        why=(
+            "It is an allowable cost the government reimburses, so a contractor "
+            "recovers a return on the capital its facilities represent; leaving it "
+            "off a proposal forfeits real money."
+        ),
+        example=(
+            "A contractor's overhead pool has facilities-capital factor 0.00234; on "
+            "a $1,000,000 allocation base that is $2,340 of cost of money. The "
+            "engine's /api/facilities-cost-of-money sums that across pools (the DD "
+            "Form 1861 computation). The factor comes from the Treasury interest "
+            "rate the Secretary sets, applied to the assets' book value."
+        ),
+    ),
 ]
