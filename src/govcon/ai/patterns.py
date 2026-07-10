@@ -13,7 +13,7 @@ from govcon.ai.cost import CostLog
 from govcon.ai.gate import assert_synthetic
 from govcon.ai.loop import AITurnResult, run_conversation
 from govcon.ai.prompts import DEFAULT_TUTOR_PERSONA, system_for
-from govcon.ai.registry import ASK_TOOLS, TUTOR_TOOLS
+from govcon.ai.registry import ASK_TOOLS, DRAFT_RULE_TOOLS, TUTOR_TOOLS
 
 #: Determination-only fallback prose when grounding fails — never ship
 #: unverified numbers; point the user at the structured determination.
@@ -71,6 +71,34 @@ def tutor(
         system=system_for("tutor", persona=persona),
         tool_names=TUTOR_TOOLS,
         user_text=question,
+        cost_log=cost,
+    )
+    if result.grounding is not None and not result.grounding.verified:
+        result.prose = _UNVERIFIED_NOTICE
+    return result
+
+
+def draft_rule(
+    client: LLMClient,
+    session: Session,
+    instruction: str,
+    *,
+    actor: str = "unknown",
+    workspace: str = "default",
+    max_usd: Decimal | None = None,
+) -> AITurnResult:
+    """Rule-authoring (Pattern 3): draft a decision-table rule from a described
+    regulatory change, validate it structurally, and return it for a HUMAN
+    migration. Writes nothing and applies nothing (B53) — the tool subset has no
+    write/evaluate tool. Grounding still withholds ungrounded explanatory prose."""
+    assert_synthetic()  # kernel-level gate (defence in depth vs the HTTP gate)
+    cost = CostLog(pattern="draft_rule", actor=actor, workspace=workspace, max_usd=max_usd)
+    result = run_conversation(
+        client,
+        session,
+        system=system_for("draft_rule"),
+        tool_names=DRAFT_RULE_TOOLS,
+        user_text=instruction,
         cost_log=cost,
     )
     if result.grounding is not None and not result.grounding.verified:

@@ -105,6 +105,13 @@ class TutorRequest(BaseModel):
     persona: TutorPersona = TutorPersona.NEWCOMER
 
 
+class DraftRuleRequest(BaseModel):
+    instruction: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="Describe the regulatory change to draft a decision rule for.",
+    )
+
+
 def create_app(session_factory=None, workspace_registry=None, llm_client=None) -> FastAPI:
     """Build the app. ``session_factory`` is injectable for tests; otherwise it
     is derived from ``GOVCON_DB_URL`` (via make_engine).
@@ -230,11 +237,30 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         }
 
     # ------------------------------------------------------------ AI assistant
-    def _serve_ai(request: Request, run, *, extra: dict | None = None) -> dict:
+    def _grounded_envelope(result) -> dict:
+        """The default AI response shape: prose + the authoritative determination(s)
+        + grounding + cost. Used by /api/ask and /api/tutor."""
+        return {
+            "ai_available": True,
+            "prose": result.prose,
+            "determinations": result.determinations,
+            "grounding": {
+                "verified": result.grounding.verified,
+                "violations": result.grounding.violations,
+            },
+            "cost": result.cost.as_dict(),
+            "notice": (
+                "Advisory rendering over synthetic data. The structured "
+                "determination above is the authoritative result."
+            ),
+        }
+
+    def _serve_ai(request: Request, run, *, envelope=None, extra: dict | None = None) -> dict:
         """Shared plumbing for every AI pattern endpoint: rate limit → synthetic
-        gate → per-request USD ceiling → run → grounded envelope. ``run`` is a
-        callable ``(max_usd) -> AITurnResult`` capturing the pattern + inputs, so
-        /api/ask and /api/tutor share one loop of guardrails (no drift)."""
+        gate → per-request USD ceiling → run → pattern envelope. ``run`` is a
+        callable ``(max_usd) -> AITurnResult`` capturing the pattern + inputs;
+        ``envelope`` builds the pattern-specific response (defaults to the
+        grounded shape). One loop of guardrails for every AI route (no drift)."""
         from fastapi import HTTPException as _HTTPException
 
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
@@ -258,21 +284,9 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             result = run(max_usd)
         except CostCeilingError as exc:
             return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
-        return {
-            "ai_available": True,
-            "prose": result.prose,
-            "determinations": result.determinations,
-            "grounding": {
-                "verified": result.grounding.verified,
-                "violations": result.grounding.violations,
-            },
-            "cost": result.cost.as_dict(),
-            "notice": (
-                "Advisory rendering over synthetic data. The structured "
-                "determination above is the authoritative result."
-            ),
-            **(extra or {}),
-        }
+        out = (envelope or _grounded_envelope)(result)
+        out.update(extra or {})
+        return out
 
     @app.post("/api/ask")
     def ask(
@@ -322,6 +336,56 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 max_usd=max_usd,
             ),
             extra={"persona": req.persona.value},
+        )
+
+    @app.post("/api/draft-rule")
+    def draft_rule(
+        req: DraftRuleRequest, request: Request, session: Session = Depends(get_session)
+    ) -> dict:
+        """Rule-authoring (Pattern 3): describe a regulatory change → the AI drafts
+        a decision-table rule and validates it STRUCTURALLY → returns the draft for
+        a human-reviewed migration. It applies NOTHING and writes NOTHING (B53):
+        the response always carries ``requires_human_migration: true``."""
+        if llm_client is None:
+            return {"ai_available": False, "reason": "AI is not configured on this server"}
+        from govcon.ai.patterns import draft_rule as run_draft
+
+        def _draft_envelope(result) -> dict:
+            # The drafted rule is the input to the LAST validate_draft_rule call;
+            # its result is the validation. (No validate call → no validated draft.)
+            draft, validation = None, None
+            for d in result.determinations:
+                if d["tool"] == "validate_draft_rule" and not d["is_error"]:
+                    draft = (d["input"] or {}).get("rule", d["input"])
+                    validation = d["result"]
+            return {
+                "ai_available": True,
+                "prose": result.prose,
+                "draft": draft,
+                "validation": validation,
+                "requires_human_migration": True,
+                "grounding": {
+                    "verified": result.grounding.verified,
+                    "violations": result.grounding.violations,
+                },
+                "cost": result.cost.as_dict(),
+                "notice": (
+                    "DRAFT only — a proposal for a human-reviewed migration. Nothing "
+                    "was applied, saved, or put in force. Synthetic data."
+                ),
+            }
+
+        return _serve_ai(
+            request,
+            lambda max_usd: run_draft(
+                llm_client,
+                session,
+                req.instruction,
+                actor=current_actor(),
+                workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
+            ),
+            envelope=_draft_envelope,
         )
 
     # ---------------------------------------------------------------- the UI

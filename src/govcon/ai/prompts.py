@@ -71,7 +71,28 @@ def _tutor_system(persona: str) -> str:
     return _with_limits(f"{_TUTOR_BASE}\n\nAudience: {clause}")
 
 
+#: Pattern 3 (rule-authoring) — the AI DRAFTS a decision-table rule from a
+#: described regulatory change. The B53 hard line is baked into the prompt: it
+#: drafts + validates only, it can apply nothing, and it must say so.
+DRAFT_RULE_SYSTEM = _with_limits(
+    INTERFACE_CLAUSE
+    + "\n\nThe user describes a regulatory change. Draft a candidate decision-table "
+    "rule for a HUMAN to review and migrate — you are NOT applying anything. Steps: "
+    "(1) optionally call regulation_watch_review to ground the change in a real "
+    "suggestion, and threshold_in_force for any dated value; (2) compose a draft rule "
+    "as JSON — rule_key, when_ast (the engine's structural predicate grammar: "
+    "{'op','lhs','rhs'} comparisons, {'op','lhs'} unary, and 'all'/'any' groups; "
+    "operands are literals or {'input': name} / {'threshold': alias}), an optional "
+    "outcome object, an optional reason_template using only {name} placeholders, and "
+    "stop; (3) call validate_draft_rule with it and FIX any errors it reports, then "
+    "present the validated draft. You MUST state that this is a draft requiring a "
+    "human-reviewed migration — it is not, and cannot be, auto-applied. Never claim a "
+    "rule was saved, applied, or is in force. Do not invent threshold values or "
+    "citations; look them up."
+)
+
+
 def system_for(pattern: str, *, persona: str | None = None) -> str:
     if pattern == "tutor":
         return _tutor_system(persona or DEFAULT_TUTOR_PERSONA)
-    return {"ask": ASK_SYSTEM}.get(pattern, ASK_SYSTEM)
+    return {"ask": ASK_SYSTEM, "draft_rule": DRAFT_RULE_SYSTEM}.get(pattern, ASK_SYSTEM)
