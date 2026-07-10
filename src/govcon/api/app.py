@@ -10,6 +10,7 @@ completely untouched by the browsing/what-if UI.
 from __future__ import annotations
 
 import datetime
+import os
 import threading
 from collections import OrderedDict
 from collections.abc import Iterator
@@ -68,11 +69,19 @@ class TINARequest(BaseModel):
     tina_exception_waiver_granted: bool | None = None
 
 
+#: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
+#: raise from Decimal.quantize downstream) — shared bound with the AI registry.
+_MAX_MONEY = Decimal("1e15")
+
+
 def _money(raw: str) -> Decimal:
     try:
-        return Decimal(raw)
+        value = Decimal(raw)
     except (InvalidOperation, TypeError) as exc:  # pragma: no cover - guard
         raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
+    if not value.is_finite() or abs(value) > _MAX_MONEY:
+        raise ValueError(f"dollar amount out of range: {raw!r}")
+    return value
 
 
 class AskRequest(BaseModel):
@@ -193,6 +202,13 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
         except SyntheticGateError as exc:
             return {"ai_available": False, "reason": str(exc)}
+        # Hard per-request USD ceiling so a single /api/ask cannot drive
+        # unbounded Claude spend (GOVCON_AI_MAX_USD, default $0.50). Combined
+        # with the rate limiter below, this bounds AI cost-DoS.
+        try:
+            max_usd = Decimal(os.environ.get("GOVCON_AI_MAX_USD", "0.50"))
+        except (InvalidOperation, TypeError):
+            max_usd = Decimal("0.50")
         try:
             result = run_ask(
                 llm_client,
@@ -200,9 +216,10 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
                 req.question,
                 actor=current_actor(),
                 workspace=request.headers.get("x-govcon-workspace") or "default",
+                max_usd=max_usd,
             )
         except CostCeilingError as exc:
-            return {"ai_available": True, "error": str(exc)}
+            return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
         return {
             "ai_available": True,
             "prose": result.prose,
@@ -226,17 +243,17 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
     # ------------------------------------------------------------ determinations
     @app.post("/api/cas")
     def cas(req: CASRequest, session: Session = Depends(get_session)) -> dict:
-        contract = Contract(
-            award_date=req.award_date,
-            contract_value=_money(req.contract_value),
-            contractor_size=req.contractor_size,
-            is_nontraditional_dc=req.is_nontraditional_dc,
-            agency_type=req.agency_type,
-            cas_coverage_type=CASCoverageType.NONE,
-        )
         try:
+            contract = Contract(
+                award_date=req.award_date,
+                contract_value=_money(req.contract_value),
+                contractor_size=req.contractor_size,
+                is_nontraditional_dc=req.is_nontraditional_dc,
+                agency_type=req.agency_type,
+                cas_coverage_type=CASCoverageType.NONE,
+            )
             d = determine_cas_coverage(session, contract)
-        except LookupError as exc:
+        except (ValueError, LookupError) as exc:
             return {"available": False, "message": str(exc)}
         return {
             "available": True,
@@ -250,22 +267,22 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
     @app.post("/api/tina")
     def tina(req: TINARequest, session: Session = Depends(get_session)) -> dict:
-        action = ContractAction(
-            action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
-            action_date=req.action_date,
-            proposed_value=_money(req.proposed_value),
-            tina_exception_adequate_price_competition=(
-                req.tina_exception_adequate_price_competition
-            ),
-            tina_exception_commercial_product_service=(
-                req.tina_exception_commercial_product_service
-            ),
-            tina_exception_prices_set_by_law=req.tina_exception_prices_set_by_law,
-            tina_exception_waiver_granted=req.tina_exception_waiver_granted,
-        )
         try:
+            action = ContractAction(
+                action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
+                action_date=req.action_date,
+                proposed_value=_money(req.proposed_value),
+                tina_exception_adequate_price_competition=(
+                    req.tina_exception_adequate_price_competition
+                ),
+                tina_exception_commercial_product_service=(
+                    req.tina_exception_commercial_product_service
+                ),
+                tina_exception_prices_set_by_law=req.tina_exception_prices_set_by_law,
+                tina_exception_waiver_granted=req.tina_exception_waiver_granted,
+            )
             d = determine_tina_applicability(session, action)
-        except LookupError as exc:
+        except (ValueError, LookupError) as exc:
             return {"available": False, "message": str(exc)}
         return {
             "available": True,
