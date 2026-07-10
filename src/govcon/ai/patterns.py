@@ -104,3 +104,31 @@ def draft_rule(
     if result.grounding is not None and not result.grounding.verified:
         result.prose = _UNVERIFIED_NOTICE
     return result
+
+
+def draft_narrative(
+    client: LLMClient,
+    session: Session,
+    instruction: str,
+    *,
+    actor: str = "unknown",
+    workspace: str = "default",
+    max_usd: Decimal | None = None,
+) -> AITurnResult:
+    """Narrative drafter (Pattern 4): a memo grounded ENTIRELY in the engine's
+    computed numbers. Strictest grounding — an ungrounded figure withholds the
+    memo (the authoritative determination is still returned). A synthetic,
+    advisory draft, never a filing."""
+    assert_synthetic()  # kernel-level gate (defence in depth vs the HTTP gate)
+    cost = CostLog(pattern="draft_narrative", actor=actor, workspace=workspace, max_usd=max_usd)
+    result = run_conversation(
+        client,
+        session,
+        system=system_for("draft_narrative"),
+        tool_names=ASK_TOOLS,
+        user_text=instruction,
+        cost_log=cost,
+    )
+    if result.grounding is not None and not result.grounding.verified:
+        result.prose = _UNVERIFIED_NOTICE
+    return result

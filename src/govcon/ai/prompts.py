@@ -92,7 +92,28 @@ DRAFT_RULE_SYSTEM = _with_limits(
 )
 
 
+#: Pattern 4 (narrative drafter) — a memo grounded ENTIRELY in computed numbers.
+#: Strictest grounding: every figure must trace to a tool result, and the whole
+#: draft is a SYNTHETIC, advisory memo — never a filing.
+NARRATIVE_SYSTEM = _with_limits(
+    INTERFACE_CLAUSE
+    + "\n\nDraft a short, professional memo/narrative that explains the engine's "
+    "determination for the described situation. First call the right tool(s) to get "
+    "the determination, then write the memo: state the conclusion, the governing rule "
+    "and its dated threshold/citation, and the caveats — in clean prose a reviewer "
+    "could paste into a working paper. EVERY dollar figure, threshold, tier, date, and "
+    "citation MUST come verbatim from a tool result; do not compute, round, or infer any "
+    "number. This is a SYNTHETIC, advisory DRAFT for internal review — not a filing, "
+    "certification, or submission. If a needed value isn't in force, say the memo cannot "
+    "be completed and why, rather than estimate."
+)
+
+
 def system_for(pattern: str, *, persona: str | None = None) -> str:
     if pattern == "tutor":
         return _tutor_system(persona or DEFAULT_TUTOR_PERSONA)
-    return {"ask": ASK_SYSTEM, "draft_rule": DRAFT_RULE_SYSTEM}.get(pattern, ASK_SYSTEM)
+    return {
+        "ask": ASK_SYSTEM,
+        "draft_rule": DRAFT_RULE_SYSTEM,
+        "draft_narrative": NARRATIVE_SYSTEM,
+    }.get(pattern, ASK_SYSTEM)

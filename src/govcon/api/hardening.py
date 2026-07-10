@@ -79,7 +79,9 @@ _PUBLIC_API_PATHS = frozenset({"/api/about"})
 #: The expensive AI routes the optional required-scope gate applies to (403 when
 #: a valid token lacks the scope). Read-only determinations stay open to any
 #: authenticated user.
-_SCOPE_GATED_PATHS = frozenset({"/api/ask", "/api/tutor", "/api/draft-rule"})
+_SCOPE_GATED_PATHS = frozenset(
+    {"/api/ask", "/api/tutor", "/api/draft-rule", "/api/draft-narrative"}
+)
 
 
 def _bearer_token(request: Request) -> str | None:
