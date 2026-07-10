@@ -26,10 +26,11 @@ govcon serve --host 127.0.0.1 --port 8000     # add --workspaces for routing
 
 | Var | Default | Effect |
 |---|---|---|
-| `GOVCON_DATA_MODE` | `synthetic` | Any other value fails the AI gate closed (no AI on non-synthetic data). |
+| `GOVCON_DATA_MODE` | `synthetic` | `synthetic` (cloud or local model) · `real` → **local-only**: the AI runs on a LOCAL model (Ollama) and the gate REFUSES real data to any cloud/absent client, so real data never leaves the machine. Any other value fails closed. Still advisory / not certified in every mode. |
+| `GOVCON_OLLAMA_URL` / `GOVCON_OLLAMA_MODEL` | `http://localhost:11434` / `llama3.1` | The local model for real-data mode. Needs Ollama running with a tool-capable model; no cloud key involved. |
 | `GOVCON_DB_URL` | `sqlite:///govcon.db` | SQLite (default) or `postgresql+psycopg://…` (needs the `postgres` extra). |
-| `ANTHROPIC_API_KEY` | — | Enables the `/api/ask` assistant (with the `ai` extra). |
-| `GOVCON_AI_MODEL` | `claude-opus-4-8` | Model for the assistant. |
+| `ANTHROPIC_API_KEY` | — | Enables the cloud `/api/ask` assistant on SYNTHETIC data (with the `ai` extra). Never used in real-data mode. |
+| `GOVCON_AI_MODEL` | `claude-opus-4-8` | Cloud model for the assistant (synthetic mode). |
 | `GOVCON_AI_MAX_USD` | `0.50` | Hard per-request USD ceiling for `/api/ask`. |
 | `GOVCON_AI_RATE_LIMIT` / `_WINDOW_S` | `30` / `60` | `/api/ask` requests per window per client IP → 429. |
 | `GOVCON_API_TOKEN` | — | Coarse shared-secret edge gate: when set (and JWT auth is off), every `/api/*` request must send `Authorization: Bearer <token>` (constant-time compared). **NOT an identity provider.** Superseded by JWT auth when that is configured. |

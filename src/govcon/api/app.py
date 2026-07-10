@@ -187,8 +187,10 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             db_ok = True
         except Exception:  # pragma: no cover - only on a broken DB
             db_ok = False
+        from govcon.ai.gate import data_mode
+
         return {"status": "ok" if db_ok else "degraded", "db": db_ok,
-                "ai": llm_client is not None}
+                "ai": llm_client is not None, "data_mode": data_mode()}
 
     # Bounded engine cache (one connection pool per workspace); an LRU cap +
     # lock stop unbounded pool growth and a check-then-build race across the
@@ -295,13 +297,13 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         from fastapi import HTTPException as _HTTPException
 
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
-        from govcon.ai.gate import assert_synthetic
+        from govcon.ai.gate import assert_data_mode
         from govcon.api.hardening import _client_key
 
         if not ask_limiter.allow(_client_key(request)):
             raise _HTTPException(status_code=429, detail="rate limit exceeded; slow down")
         try:
-            assert_synthetic()  # fast HTTP-layer reject (kernel re-checks)
+            assert_data_mode(llm_client)  # fast HTTP-layer reject (kernel re-checks)
         except SyntheticGateError as exc:
             return {"ai_available": False, "reason": str(exc)}
         # Hard per-request USD ceiling so a single AI call cannot drive unbounded
@@ -327,7 +329,7 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
         from fastapi import HTTPException as _HTTPException
 
         from govcon.ai.errors import CostCeilingError, SyntheticGateError
-        from govcon.ai.gate import assert_synthetic
+        from govcon.ai.gate import assert_data_mode
         from govcon.api.hardening import _client_key
         from govcon.core.logging import get_logger
 
@@ -336,7 +338,7 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
 
         def _events():
             try:
-                assert_synthetic()
+                assert_data_mode(llm_client)
             except SyntheticGateError as exc:
                 yield _sse({"type": "unavailable", "reason": str(exc)})
                 yield _sse({"type": "done"})

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from govcon.ai.client import LLMClient
 from govcon.ai.cost import CostLog
-from govcon.ai.gate import assert_synthetic
+from govcon.ai.gate import assert_data_mode
 from govcon.ai.loop import AITurnResult, iter_conversation, run_conversation
 from govcon.ai.prompts import DEFAULT_TUTOR_PERSONA, system_for
 from govcon.ai.registry import ASK_TOOLS, DRAFT_RULE_TOOLS, TUTOR_TOOLS
@@ -62,7 +62,7 @@ def run_pattern(
 ) -> AITurnResult:
     """Gate synthetic-only, run the grounded loop for ``pattern``, and withhold
     prose that fails grounding (the determination always stays)."""
-    assert_synthetic()  # kernel-level gate (defence in depth vs the HTTP gate)
+    assert_data_mode(client)  # kernel gate: real data → LOCAL client only (defence in depth)
     system, tools = _pattern_config(pattern, persona)
     cost = CostLog(pattern=pattern, actor=actor, workspace=workspace, max_usd=max_usd)
     result = run_conversation(
@@ -86,7 +86,7 @@ def stream_pattern(
     the loop's progress + determination events as they resolve, then the final
     grounding / prose (withheld if ungrounded) / cost events. Same gate, same
     grounding, same withhold — a streamed answer cannot diverge from a batch one."""
-    assert_synthetic()  # kernel-level gate (defence in depth vs the HTTP gate)
+    assert_data_mode(client)  # kernel gate: real data → LOCAL client only (defence in depth)
     system, tools = _pattern_config(pattern, persona)
     cost = CostLog(pattern=pattern, actor=actor, workspace=workspace, max_usd=max_usd)
     gen = iter_conversation(

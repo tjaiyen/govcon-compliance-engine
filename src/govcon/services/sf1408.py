@@ -218,7 +218,7 @@ _LIMITATION_1_AUTHENTICATED = """\
    certification and not a DCAA system-adequacy test.
 """
 
-_LIMITATIONS_REST = """\
+_LIMITATIONS_2_3 = """\
 2. DESIGN vs. OPERATION: SF 1408 is a DESIGN review. Passing this tool's
    self-check demonstrates the design criteria are understood and modeled;
    it says nothing about adequacy in extended operation (the post-award
@@ -227,8 +227,24 @@ _LIMITATIONS_REST = """\
    configuration and actual use drive adequacy. This tool demonstrates
    understanding of the criteria; it is not a certification and cannot
    stand in for DCAA pre-award or post-award system adequacy testing.
+"""
+
+#: Item 4 tracks the live data mode. Synthetic by default; in real-data mode the
+#: tool is processing REAL data on a LOCAL model only (it is still advisory).
+_LIMITATION_4_SYNTHETIC = """\
 4. SYNTHETIC DATA ONLY: nothing here touches real contract, employer, or
    CUI/ITAR data; every figure is a hand-authored test fixture.
+"""
+
+_LIMITATION_4_REAL = """\
+4. REAL-DATA MODE (LOCAL ONLY): real-data mode is enabled. The data you provide
+   is REAL and is processed by a LOCAL model on this machine — it is never sent
+   to an external service. The tool remains ADVISORY: it is NOT a certified
+   accounting system and NOT for regulatory filing, and you are responsible for
+   the accuracy of the data you enter.
+"""
+
+_LIMITATIONS_5_7 = """\
 5. CRITERIA COUNT: this self-check implements the six verified structural
    criteria. A secondary source claims 14; that conflict is documented,
    unresolved, and must be settled against DCAA's actual current SF 1408
@@ -244,19 +260,22 @@ _LIMITATIONS_REST = """\
    determination — the structured determination (tier, reasons, caveats,
    provenance, citation) is the authoritative, audited fact. AI prose is
    verified to cite only engine-produced values, is withheld when it cannot
-   be verified, and is never itself a system-of-record entry. The AI layer
-   runs on SYNTHETIC data only (fail-closed).
+   be verified, and is never itself a system-of-record entry. The AI layer is
+   gated: synthetic data by default, and in real-data mode it runs on a LOCAL
+   model only — real data never leaves the machine (fail-closed).
 """
 
 
 def explain_limitations() -> str:
-    """The tool's self-stated limitations. Item 1 reflects the live identity
-    posture: ASSERTED by default, AUTHENTICATED when real JWT auth is
-    configured — auth and real-data are separate switches, so the synthetic /
-    advisory posture holds either way."""
+    """The tool's self-stated limitations. Items 1 and 4 track the live posture:
+    item 1 = ASSERTED vs AUTHENTICATED identity (JWT auth); item 4 = SYNTHETIC vs
+    REAL-DATA (local-only) data mode. Authentication and real-data are separate
+    switches, and the tool stays advisory / not-certified in every combination."""
+    from govcon.ai.gate import is_real
     from govcon.api.auth import auth_is_configured
 
     item_1 = (
         _LIMITATION_1_AUTHENTICATED if auth_is_configured() else _LIMITATION_1_ASSERTED
     )
-    return _LIMITATIONS_HEADER + item_1 + _LIMITATIONS_REST
+    item_4 = _LIMITATION_4_REAL if is_real() else _LIMITATION_4_SYNTHETIC
+    return _LIMITATIONS_HEADER + item_1 + _LIMITATIONS_2_3 + item_4 + _LIMITATIONS_5_7
