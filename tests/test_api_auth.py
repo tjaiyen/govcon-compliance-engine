@@ -297,6 +297,38 @@ def test_scope_gate_also_covers_tutor(session_factory, monkeypatch):
                   headers=_bearer(idp.mint_hs256(SECRET, scope="ask:run"))).status_code == 200
 
 
+def test_streaming_endpoint_is_auth_gated(session_factory, monkeypatch):
+    # cross-cutting: the SSE variant (?stream=1) runs the SAME path-based auth
+    # gate as the JSON path — the query string doesn't slip past it.
+    _auth_on(monkeypatch)
+    monkeypatch.setenv("GOVCON_DATA_MODE", "synthetic")
+    from tests.ai.conftest import FakeLLMClient, final_turn
+
+    fake = FakeLLMClient([final_turn("ok")])
+    c = TestClient(create_app(session_factory=session_factory, llm_client=fake))
+    # no token → 401 (the gate runs before the endpoint, so it's a JSON 401)
+    assert c.post("/api/ask?stream=1", json={"question": "hi"}).status_code == 401
+    # valid token → 200 event-stream that runs to completion
+    r = c.post("/api/ask?stream=1", json={"question": "hi"},
+               headers=_bearer(idp.mint_hs256(SECRET)))
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert '"type": "done"' in r.text
+
+
+def test_streaming_honors_scope_gate(session_factory, monkeypatch):
+    _auth_on(monkeypatch, required_scope="ask:run")
+    monkeypatch.setenv("GOVCON_DATA_MODE", "synthetic")
+    from tests.ai.conftest import FakeLLMClient, final_turn
+
+    fake = FakeLLMClient([final_turn("ok")])
+    c = TestClient(create_app(session_factory=session_factory, llm_client=fake))
+    # a valid token missing the scope is forbidden on the streaming route too
+    assert c.post("/api/ask?stream=1", json={"question": "hi"},
+                  headers=_bearer(idp.mint_hs256(SECRET))).status_code == 403
+    assert c.post("/api/ask?stream=1", json={"question": "hi"},
+                  headers=_bearer(idp.mint_hs256(SECRET, scope="ask:run"))).status_code == 200
+
+
 def test_auth_is_independent_of_synthetic_gate(session_factory, monkeypatch):
     """auth ≠ real-data: a valid token does NOT flip the tool into real-data
     mode — the synthetic gate still fails closed on GOVCON_DATA_MODE=real."""
