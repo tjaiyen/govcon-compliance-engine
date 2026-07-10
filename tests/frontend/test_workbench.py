@@ -101,6 +101,19 @@ def test_far15_card_runs_price_vs_cost_and_subcontract(page, live_server):
     expect(result).to_contain_text("Subcontractor certified data REQUIRED", ignore_case=True)
 
 
+def test_weighted_guidelines_card_computes_objective(page, live_server):
+    page.goto(live_server)
+    page.fill("#w-base", "1000000")
+    page.select_option("#w-type", "ffp_no_financing")
+    page.fill("#w-tech", "5")
+    page.fill("#w-mgmt", "5")
+    page.fill("#w-ctr", "5")
+    page.click("#f-wg button[type=submit]")
+    result = page.locator("#r-wg")
+    expect(result).to_contain_text("Profit objective $150000.00")
+    expect(result).to_contain_text("in range")
+
+
 def test_double_submit_button_disables_during_fetch(page, live_server):
     page.goto(live_server)
     page.fill("#c-date", "2026-05-15")

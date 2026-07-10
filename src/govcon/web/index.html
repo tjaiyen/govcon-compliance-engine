@@ -237,6 +237,34 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <div class="result" id="r-far15" tabindex="-1" aria-live="polite" hidden></div>
   </section>
 
+  <!-- ============ FAR 15.404-4 weighted guidelines ============ -->
+  <section class="card" id="wg-card">
+    <p class="eyebrow-sm">Flow 01c &middot; Profit (DFARS weighted guidelines)</p>
+    <h2>Weighted-guidelines profit objective</h2>
+    <p class="sub">FAR 15.404-4 / DFARS 215.404-71 (DD-1547): the structured DoD profit objective. Assign each risk factor within its designated range &mdash; the engine computes the objective and flags anything out of range. Advisory only; profit is always negotiated.</p>
+    <form id="f-wg">
+      <div class="grid">
+        <div><label for="w-base">Cost base (excl. FCCM, USD)</label><input type="text" id="w-base" class="mono" inputmode="decimal" value="1000000"></div>
+        <div><label for="w-type">Contract type</label><select id="w-type">
+          <option value="ffp_no_financing">FFP &mdash; no financing</option>
+          <option value="ffp_progress_payments">FFP &mdash; progress payments</option>
+          <option value="fpi_no_financing">Fixed-price incentive</option>
+          <option value="cpif">Cost-plus-incentive-fee</option>
+          <option value="cpff">Cost-plus-fixed-fee</option>
+          <option value="time_and_materials">Time-and-materials</option>
+        </select></div>
+      </div>
+      <div class="grid">
+        <div><label for="w-tech">Technical risk %</label><input type="text" id="w-tech" class="mono" inputmode="decimal" value="5"></div>
+        <div><label for="w-mgmt">Management / cost-control %</label><input type="text" id="w-mgmt" class="mono" inputmode="decimal" value="5"></div>
+        <div><label for="w-ctr">Contract-type risk %</label><input type="text" id="w-ctr" class="mono" inputmode="decimal" value="5"></div>
+      </div>
+      <div class="check"><input type="checkbox" id="w-techinc"><label for="w-techinc" style="margin:0">Technology incentive (widens the technical range to 7&ndash;11%)</label></div>
+      <button type="submit">Compute profit objective</button>
+    </form>
+    <div class="result" id="r-wg" tabindex="-1" aria-live="polite" hidden></div>
+  </section>
+
   <!-- ============ threshold explorer ============ -->
   <section class="card">
     <p class="eyebrow-sm">Flow 02 · See the rule</p>
@@ -462,6 +490,23 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       host.innerHTML = far15AnalysisVerdict(res[0]) + '<div style="margin-top:18px">' + far15SubVerdict(res[1]) + "</div>";
       host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
     }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine. Please try again.</p>'; })
+      .then(function () { if (btn) btn.disabled = false; });
+  });
+
+  // ---- flow 01c: weighted guidelines profit ----
+  $("f-wg").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = e.target.querySelector('[type="submit"]'); if (btn) btn.disabled = true;
+    var body = { cost_base: parseMoney($("w-base").value || "0"), contract_type: $("w-type").value, technical_pct: ($("w-tech").value || "0"), management_pct: ($("w-mgmt").value || "0"), contract_type_risk_pct: ($("w-ctr").value || "0"), technology_incentive: $("w-techinc").checked };
+    var host = $("r-wg"); host.hidden = false; host.innerHTML = '<p class="muted">Computing the objective…</p>';
+    post("/api/weighted-guidelines", body).then(function (b) {
+      if (!b.available) { host.innerHTML = '<p class="muted">' + esc(b.message || "Could not compute.") + "</p>"; return; }
+      var findings = (b.factor_findings || []).map(function (f) {
+        return '<div class="watch-item"><span class="kind">' + esc(f.factor) + "</span> " + esc(f.value_pct) + "% " + (f.in_range ? '<span class="tag ok">in range</span>' : '<span class="tag stop">outside ' + esc(f.designated_range) + "</span>") + "</div>";
+      }).join("");
+      host.innerHTML = '<div class="verdict"><span class="tag ok">DD-1547</span><h3>Profit objective $' + esc(b.total_profit_objective) + " (" + esc(b.profit_rate_pct) + "% of cost)</h3></div>" + findings + teach(b.reasons, b.caveats, null);
+      host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+    }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine.</p>'; })
       .then(function () { if (btn) btn.disabled = false; });
   });
 

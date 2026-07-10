@@ -9,12 +9,14 @@ outcomes pre-registered (B35).
 import datetime
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 
 from govcon.api import create_app
 from govcon.models import ContractAction
 from govcon.models.enums import ContractActionType
 from govcon.services.pricing_analysis import (
+    compute_weighted_guidelines_profit,
     determine_price_or_cost_analysis,
     determine_subcontract_certified_data,
 )
@@ -122,7 +124,71 @@ def test_api_pricing_analysis_and_subcontract(session_factory):
     assert sd["threshold_value"] == "10000000.00"
 
 
+# ------------------------------------- FAR 15.404-4 / DFARS 215.404-71 weighted guidelines
+def test_weighted_guidelines_objective_and_rate():
+    d = compute_weighted_guidelines_profit(
+        cost_base=Decimal("1000000"), contract_type="ffp_no_financing",
+        technical_pct=Decimal("5"), management_pct=Decimal("5"),
+        contract_type_risk_pct=Decimal("5"))
+    # perf = (5%+5%)×1M = 100k; CTR = 5%×1M = 50k; total = 150k = 15% of the base
+    assert d.performance_risk_profit == Decimal("100000.00")
+    assert d.contract_type_risk_profit == Decimal("50000.00")
+    assert d.total_profit_objective == Decimal("150000.00")
+    assert d.profit_rate_pct == Decimal("15")
+    assert all(f["in_range"] for f in d.factor_findings)
+    assert d.source_citation == "DFARS 215.404-71 (FAR 15.404-4)"
+
+
+def test_weighted_guidelines_flags_out_of_range_factor():
+    # technical 9% is outside the normal 3–7% range (no technology incentive)
+    d = compute_weighted_guidelines_profit(
+        cost_base=Decimal("1000000"), contract_type="cpff",
+        technical_pct=Decimal("9"), management_pct=Decimal("5"),
+        contract_type_risk_pct=Decimal("0.5"))
+    tech = next(f for f in d.factor_findings if f["factor"] == "technical risk")
+    assert tech["in_range"] is False and tech["designated_range"] == "3% to 7%"
+    assert any("OUTSIDE the DFARS designated range" in c for c in d.caveats)
+
+
+def test_weighted_guidelines_technology_incentive_widens_range():
+    d = compute_weighted_guidelines_profit(
+        cost_base=Decimal("1000000"), contract_type="cpif",
+        technical_pct=Decimal("9"), management_pct=Decimal("5"),
+        contract_type_risk_pct=Decimal("1"), technology_incentive=True)
+    tech = next(f for f in d.factor_findings if f["factor"] == "technical risk")
+    assert tech["in_range"] is True and tech["designated_range"] == "7% to 11%"
+
+
+def test_weighted_guidelines_includes_provided_facilities_capital():
+    d = compute_weighted_guidelines_profit(
+        cost_base=Decimal("1000000"), contract_type="cpff",
+        technical_pct=Decimal("5"), management_pct=Decimal("5"),
+        contract_type_risk_pct=Decimal("0.5"),
+        facilities_capital_profit=Decimal("7500"))
+    assert d.facilities_capital_profit == Decimal("7500")
+    # 100k perf + 5k CTR (0.5% of 1M) + 7.5k FCCM = 112.5k
+    assert d.total_profit_objective == Decimal("112500.00")
+
+
+def test_weighted_guidelines_unknown_contract_type_raises():
+    with pytest.raises(ValueError):
+        compute_weighted_guidelines_profit(
+            cost_base=Decimal("1000000"), contract_type="handshake",
+            technical_pct=Decimal("5"), management_pct=Decimal("5"),
+            contract_type_risk_pct=Decimal("5"))
+
+
+def test_api_weighted_guidelines(session_factory):
+    c = TestClient(create_app(session_factory=session_factory))
+    wg = c.post("/api/weighted-guidelines", json={
+        "cost_base": "1000000", "contract_type": "ffp_no_financing",
+        "technical_pct": "5", "management_pct": "5", "contract_type_risk_pct": "5"}).json()
+    assert wg["available"] and wg["total_profit_objective"] == "150000.00"
+    assert wg["profit_rate_pct"] == "15.00"
+
+
 def test_workbench_has_far15_card(session_factory):
     html = TestClient(create_app(session_factory=session_factory)).get("/").text
     assert 'id="f-far15"' in html
     assert "/api/pricing-analysis" in html and "/api/subcontract-data" in html
+    assert 'id="f-wg"' in html and "/api/weighted-guidelines" in html

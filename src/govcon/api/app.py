@@ -77,6 +77,16 @@ class SubcontractDataRequest(BaseModel):
     sub_proposed_value: str = Field(..., description="Decimal string — the subcontract's proposed price")
 
 
+class WeightedGuidelinesRequest(BaseModel):
+    cost_base: str = Field(..., description="DD-1547 Block 20: total cost excluding FCCM (USD)")
+    contract_type: str = Field(..., description="e.g. ffp_no_financing, fpi_progress_payments, cpif, cpff")
+    technical_pct: str = Field(..., description="Assigned technical risk % (DFARS 215.404-71-2)")
+    management_pct: str = Field(..., description="Assigned management/cost-control risk %")
+    contract_type_risk_pct: str = Field(..., description="Assigned contract-type risk % (215.404-71-3)")
+    technology_incentive: bool = False
+    facilities_capital_profit: str = "0"
+
+
 #: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
 #: raise from Decimal.quantize downstream) — shared bound with the AI registry.
 _MAX_MONEY = Decimal("1e15")
@@ -89,6 +99,17 @@ def _money(raw: str) -> Decimal:
         raise ValueError(f"not a valid dollar amount: {raw!r}") from exc
     if not value.is_finite() or abs(value) > _MAX_MONEY:
         raise ValueError(f"dollar amount out of range: {raw!r}")
+    return value
+
+
+def _pct(raw: str) -> Decimal:
+    """Parse a percentage input (e.g. '5.0'); reject non-finite / absurd values."""
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, TypeError) as exc:  # pragma: no cover - guard
+        raise ValueError(f"not a valid percentage: {raw!r}") from exc
+    if not value.is_finite() or abs(value) > 1000:
+        raise ValueError(f"percentage out of range: {raw!r}")
     return value
 
 
@@ -704,6 +725,40 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             "exceeds_threshold": d.exceeds_threshold,
             "exceeds_ten_percent_of_prime": d.exceeds_ten_percent_of_prime,
             "meets_absolute_20m": d.meets_absolute_20m,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+            "source_citation": d.source_citation,
+        }
+
+    @app.post("/api/weighted-guidelines")
+    def weighted_guidelines(req: WeightedGuidelinesRequest) -> dict:
+        """FAR 15.404-4 / DFARS 215.404-71: the DoD weighted-guidelines profit
+        objective (DD-1547), with each assigned factor validated against its
+        designated range. Pure calc; no dated lookup."""
+        from govcon.services.pricing_analysis import compute_weighted_guidelines_profit
+
+        try:
+            d = compute_weighted_guidelines_profit(
+                cost_base=_money(req.cost_base),
+                contract_type=req.contract_type,
+                technical_pct=_pct(req.technical_pct),
+                management_pct=_pct(req.management_pct),
+                contract_type_risk_pct=_pct(req.contract_type_risk_pct),
+                technology_incentive=req.technology_incentive,
+                facilities_capital_profit=_money(req.facilities_capital_profit),
+            )
+        except ValueError as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "cost_base": str(d.cost_base),
+            "contract_type": d.contract_type,
+            "performance_risk_profit": str(d.performance_risk_profit),
+            "contract_type_risk_profit": str(d.contract_type_risk_profit),
+            "facilities_capital_profit": str(d.facilities_capital_profit),
+            "total_profit_objective": str(d.total_profit_objective),
+            "profit_rate_pct": str(d.profit_rate_pct),
+            "factor_findings": d.factor_findings,
             "reasons": d.reasons,
             "caveats": d.caveats,
             "source_citation": d.source_citation,
