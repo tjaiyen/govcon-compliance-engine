@@ -114,6 +114,19 @@ def test_weighted_guidelines_card_computes_objective(page, live_server):
     expect(result).to_contain_text("in range")
 
 
+def test_weighted_guidelines_folds_in_facilities_capital(page, live_server):
+    page.goto(live_server)
+    page.fill("#w-base", "1000000")
+    page.select_option("#w-type", "cpff")
+    page.fill("#w-tech", "5")
+    page.fill("#w-mgmt", "5")
+    page.fill("#w-ctr", "0.5")
+    page.fill("#w-equip", "2000000")   # $2M equipment × 17.5% = $350k facilities capital
+    page.click("#f-wg button[type=submit]")
+    # 100k perf + 5k CTR (0.5%) + 350k facilities capital = 455k
+    expect(page.locator("#r-wg")).to_contain_text("Profit objective $455000.00")
+
+
 def test_double_submit_button_disables_during_fetch(page, live_server):
     page.goto(live_server)
     page.fill("#c-date", "2026-05-15")

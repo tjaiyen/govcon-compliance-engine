@@ -16,6 +16,7 @@ from govcon.api import create_app
 from govcon.models import ContractAction
 from govcon.models.enums import ContractActionType
 from govcon.services.pricing_analysis import (
+    compute_facilities_capital_profit,
     compute_weighted_guidelines_profit,
     determine_price_or_cost_analysis,
     determine_subcontract_certified_data,
@@ -187,8 +188,40 @@ def test_api_weighted_guidelines(session_factory):
     assert wg["profit_rate_pct"] == "15.00"
 
 
+# ---------------------------------------- DFARS 215.404-71-4 facilities capital employed
+def test_facilities_capital_only_equipment_earns_profit():
+    d = compute_facilities_capital_profit(
+        equipment_capital=Decimal("2000000"),
+        land_capital=Decimal("500000"), buildings_capital=Decimal("1000000"))
+    # only equipment earns: $2M × 17.5% = $350,000; land + buildings = 0
+    assert d.facilities_capital_profit == Decimal("350000.00")
+    assert d.equipment_factor_pct == Decimal("17.5")
+    assert next(f for f in d.factor_findings if f["factor"] == "land")["value_pct"] == "0"
+
+
+def test_facilities_capital_flags_equipment_factor_out_of_range():
+    d = compute_facilities_capital_profit(
+        equipment_capital=Decimal("1000000"), equipment_factor_pct=Decimal("30"))
+    eq = next(f for f in d.factor_findings if f["factor"] == "equipment")
+    assert eq["in_range"] is False and eq["designated_range"] == "10% to 25%"
+    assert any("OUTSIDE the DFARS 10%–25%" in c for c in d.caveats)
+
+
+def test_facilities_capital_composes_into_weighted_guidelines(session_factory):
+    c = TestClient(create_app(session_factory=session_factory))
+    fc = c.post("/api/facilities-capital", json={"equipment_capital": "2000000"}).json()
+    assert fc["available"] and fc["facilities_capital_profit"] == "350000.00"
+    wg = c.post("/api/weighted-guidelines", json={
+        "cost_base": "1000000", "contract_type": "cpff", "technical_pct": "5",
+        "management_pct": "5", "contract_type_risk_pct": "0.5",
+        "facilities_capital_profit": fc["facilities_capital_profit"]}).json()
+    # 100k perf + 5k CTR (0.5%) + 350k facilities capital = 455k
+    assert wg["total_profit_objective"] == "455000.00"
+
+
 def test_workbench_has_far15_card(session_factory):
     html = TestClient(create_app(session_factory=session_factory)).get("/").text
     assert 'id="f-far15"' in html
     assert "/api/pricing-analysis" in html and "/api/subcontract-data" in html
     assert 'id="f-wg"' in html and "/api/weighted-guidelines" in html
+    assert 'id="w-equip"' in html and "/api/facilities-capital" in html

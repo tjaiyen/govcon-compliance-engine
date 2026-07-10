@@ -201,6 +201,30 @@ def _run_weighted_guidelines(session: Session, inp: dict) -> dict:
     }
 
 
+def _run_facilities_capital(session: Session, inp: dict) -> dict:
+    from govcon.services.pricing_analysis import compute_facilities_capital_profit
+
+    try:
+        d = compute_facilities_capital_profit(
+            equipment_capital=_money(inp["equipment_capital"]),
+            land_capital=_money(inp.get("land_capital", "0")),
+            buildings_capital=_money(inp.get("buildings_capital", "0")),
+            equipment_factor_pct=Decimal(str(inp.get("equipment_factor_pct", "17.5"))),
+        )
+    except (ValueError, InvalidOperation) as exc:
+        return {"available": False, "message": str(exc)}
+    return {
+        "available": True,
+        "equipment_capital": str(d.equipment_capital),
+        "equipment_factor_pct": str(d.equipment_factor_pct),
+        "facilities_capital_profit": str(d.facilities_capital_profit),
+        "factor_findings": d.factor_findings,
+        "reasons": d.reasons,
+        "caveats": d.caveats,
+        "source_citation": d.source_citation,
+    }
+
+
 def _run_threshold(session: Session, inp: dict) -> dict:
     try:
         row = threshold_in_force(session, inp["rule"], _date(inp["on"]))
@@ -413,6 +437,26 @@ TOOLS: dict[str, ToolSpec] = {
             run=_run_weighted_guidelines,
         ),
         ToolSpec(
+            name="compute_facilities_capital_profit",
+            description=(
+                "DFARS 215.404-71-4: compute the facilities-capital-employed profit for the "
+                "weighted guidelines. Land and buildings carry a 0% factor; equipment carries "
+                "a 17.5% normal factor (range 10%–25%). Profit = equipment capital × equipment "
+                "factor. Feed the result into compute_weighted_guidelines_profit."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "equipment_capital": {"type": "string", "description": "Equipment facilities capital employed (USD, DD-1861)"},
+                    "land_capital": {"type": "string"},
+                    "buildings_capital": {"type": "string"},
+                    "equipment_factor_pct": {"type": "string", "description": "Assigned equipment factor % (10–25, normal 17.5)"},
+                },
+                "required": ["equipment_capital"],
+            },
+            run=_run_facilities_capital,
+        ),
+        ToolSpec(
             name="threshold_in_force",
             description=(
                 "Look up the dated regulatory threshold in force for a rule on a date, with its "
@@ -504,6 +548,7 @@ ASK_TOOLS = [
     "determine_price_or_cost_analysis",
     "determine_subcontract_certified_data",
     "compute_weighted_guidelines_profit",
+    "compute_facilities_capital_profit",
     "threshold_in_force",
     "run_self_check",
     "reverification_items",

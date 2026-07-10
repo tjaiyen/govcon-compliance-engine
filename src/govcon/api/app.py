@@ -87,6 +87,13 @@ class WeightedGuidelinesRequest(BaseModel):
     facilities_capital_profit: str = "0"
 
 
+class FacilitiesCapitalRequest(BaseModel):
+    equipment_capital: str = Field(..., description="Equipment facilities capital employed (USD, from DD-1861)")
+    land_capital: str = "0"
+    buildings_capital: str = "0"
+    equipment_factor_pct: str = "17.5"
+
+
 #: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
 #: raise from Decimal.quantize downstream) — shared bound with the AI registry.
 _MAX_MONEY = Decimal("1e15")
@@ -758,6 +765,34 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             "facilities_capital_profit": str(d.facilities_capital_profit),
             "total_profit_objective": str(d.total_profit_objective),
             "profit_rate_pct": str(d.profit_rate_pct),
+            "factor_findings": d.factor_findings,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+            "source_citation": d.source_citation,
+        }
+
+    @app.post("/api/facilities-capital")
+    def facilities_capital(req: FacilitiesCapitalRequest) -> dict:
+        """DFARS 215.404-71-4: facilities-capital-employed profit (land/buildings
+        0%, equipment 17.5% within 10–25%), feeding the weighted-guidelines objective."""
+        from govcon.services.pricing_analysis import compute_facilities_capital_profit
+
+        try:
+            d = compute_facilities_capital_profit(
+                equipment_capital=_money(req.equipment_capital),
+                land_capital=_money(req.land_capital),
+                buildings_capital=_money(req.buildings_capital),
+                equipment_factor_pct=_pct(req.equipment_factor_pct),
+            )
+        except ValueError as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "equipment_capital": str(d.equipment_capital),
+            "land_capital": str(d.land_capital),
+            "buildings_capital": str(d.buildings_capital),
+            "equipment_factor_pct": str(d.equipment_factor_pct),
+            "facilities_capital_profit": str(d.facilities_capital_profit),
             "factor_findings": d.factor_findings,
             "reasons": d.reasons,
             "caveats": d.caveats,
