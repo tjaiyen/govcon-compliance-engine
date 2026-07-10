@@ -317,6 +317,14 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             result = run(max_usd)
         except CostCeilingError as exc:
             return {"ai_available": True, "error": str(exc), "cost_exceeded": True}
+        except Exception:
+            # Degrade, don't 500: an unexpected failure (e.g. the local model is
+            # unreachable in real-data mode) returns a clean error the UI can show.
+            # Logged server-side; the message is generic so no internals leak.
+            from govcon.core.logging import get_logger
+
+            get_logger("govcon.api").exception("ai_request_failed")
+            return {"ai_available": True, "error": "the assistant hit an unexpected error"}
         out = (envelope or _grounded_envelope)(result)
         out.update(extra or {})
         return out

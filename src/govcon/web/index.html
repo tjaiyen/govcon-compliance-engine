@@ -436,6 +436,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       return true;
     }
     if (b.cost_exceeded) { host.innerHTML = '<p class="muted">That hit the cost ceiling before finishing. Try a shorter request.</p>'; return true; }
+    if (b.error) { host.innerHTML = '<p class="muted">' + esc(b.error) + ".</p>"; return true; }
     return false;
   }
   // shared grounded render (Ask, Tutor, Narrative): badge + prose + the
