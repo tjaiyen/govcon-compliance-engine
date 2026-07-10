@@ -16,6 +16,7 @@ from govcon.api import create_app
 from govcon.models import ContractAction
 from govcon.models.enums import ContractActionType
 from govcon.services.pricing_analysis import (
+    assess_cost_realism,
     compute_facilities_capital_profit,
     compute_weighted_guidelines_profit,
     determine_price_or_cost_analysis,
@@ -217,6 +218,44 @@ def test_facilities_capital_composes_into_weighted_guidelines(session_factory):
         "facilities_capital_profit": fc["facilities_capital_profit"]}).json()
     # 100k perf + 5k CTR (0.5%) + 350k facilities capital = 455k
     assert wg["total_profit_objective"] == "455000.00"
+
+
+# --------------------------------------------------- FAR 15.404-1(d) cost realism
+def test_cost_realism_required_on_cost_reimbursement_and_probable_cost():
+    d = assess_cost_realism(contract_type="cpff", cost_elements=[
+        {"name": "labor", "proposed": "100000", "probable": "120000"},
+        {"name": "material", "proposed": "50000"},  # no adjustment → probable = proposed
+    ])
+    assert d.realism_status == "required"
+    assert d.proposed_cost == Decimal("150000.00")
+    assert d.probable_cost == Decimal("170000.00")  # 120k + 50k
+    assert d.total_adjustment == Decimal("20000.00")
+    labor = next(f for f in d.element_findings if f["element"] == "labor")
+    assert labor["adjusted"] is True and labor["adjustment"] == "20000.00"
+    material = next(f for f in d.element_findings if f["element"] == "material")
+    assert material["adjusted"] is False
+
+
+def test_cost_realism_discretionary_on_fixed_price():
+    d = assess_cost_realism(contract_type="ffp", cost_elements=[
+        {"name": "labor", "proposed": "100000"}])
+    assert d.realism_status == "discretionary"
+    assert any("15.404-1(d)(3)" in r for r in d.reasons)
+
+
+def test_cost_realism_uses_probable_not_proposed_caveat():
+    d = assess_cost_realism(contract_type="cpif", cost_elements=[
+        {"name": "labor", "proposed": "100000", "probable": "110000"}])
+    assert any("probable cost — not the proposed cost — is used" in c for c in d.caveats)
+
+
+def test_api_cost_realism(session_factory):
+    c = TestClient(create_app(session_factory=session_factory))
+    r = c.post("/api/cost-realism", json={"contract_type": "cpff", "cost_elements": [
+        {"name": "labor", "proposed": "100000", "probable": "120000"},
+        {"name": "material", "proposed": "50000"}]}).json()
+    assert r["available"] and r["realism_status"] == "required"
+    assert r["probable_cost"] == "170000.00" and r["total_adjustment"] == "20000.00"
 
 
 def test_workbench_has_far15_card(session_factory):

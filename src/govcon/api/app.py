@@ -94,6 +94,17 @@ class FacilitiesCapitalRequest(BaseModel):
     equipment_factor_pct: str = "17.5"
 
 
+class CostElement(BaseModel):
+    name: str = "cost element"
+    proposed: str = Field(..., description="Proposed amount for this element (USD)")
+    probable: str | None = Field(None, description="Realism-adjusted (probable) amount; defaults to proposed")
+
+
+class CostRealismRequest(BaseModel):
+    contract_type: str = Field(..., description="e.g. cpff, cpif, cost, fpi, ffp")
+    cost_elements: list[CostElement] = Field(..., min_length=1)
+
+
 #: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
 #: raise from Decimal.quantize downstream) — shared bound with the AI registry.
 _MAX_MONEY = Decimal("1e15")
@@ -794,6 +805,36 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             "equipment_factor_pct": str(d.equipment_factor_pct),
             "facilities_capital_profit": str(d.facilities_capital_profit),
             "factor_findings": d.factor_findings,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+            "source_citation": d.source_citation,
+        }
+
+    @app.post("/api/cost-realism")
+    def cost_realism(req: CostRealismRequest) -> dict:
+        """FAR 15.404-1(d): roll a proposal's cost elements up to a PROBABLE COST.
+        Required on cost-reimbursement contracts; the probable cost (not the
+        proposed cost) is what the government evaluates."""
+        from govcon.services.pricing_analysis import assess_cost_realism
+
+        try:
+            elements = [
+                {"name": e.name, "proposed": e.proposed,
+                 "probable": e.proposed if e.probable is None else e.probable}
+                for e in req.cost_elements
+            ]
+            d = assess_cost_realism(contract_type=req.contract_type, cost_elements=elements)
+        except (ValueError, InvalidOperation) as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "contract_type": d.contract_type,
+            "realism_status": d.realism_status,
+            "proposed_cost": str(d.proposed_cost),
+            "probable_cost": str(d.probable_cost),
+            "total_adjustment": str(d.total_adjustment),
+            "adjustment_pct": str(d.adjustment_pct),
+            "element_findings": d.element_findings,
             "reasons": d.reasons,
             "caveats": d.caveats,
             "source_citation": d.source_citation,

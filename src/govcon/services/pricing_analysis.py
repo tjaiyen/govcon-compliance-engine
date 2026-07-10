@@ -380,3 +380,96 @@ def compute_facilities_capital_profit(
         reasons=reasons,
         caveats=caveats,
     )
+
+
+# ---------------------------------------------- FAR 15.404-1(d): cost realism analysis
+# Grounded: cost realism analysis SHALL be performed on cost-reimbursement contracts
+# to determine the PROBABLE COST (which may differ from proposed and is used for
+# evaluation) — 15.404-1(d)(2); it MAY be used on competitive FPI or, in exceptional
+# cases, other FP contracts to assess performance risk — 15.404-1(d)(3).
+
+_COST_REIMBURSEMENT_TYPES = {"cpff", "cpif", "cpaf", "cost", "cost_sharing"}
+
+
+@dataclass
+class CostRealismDetermination:
+    contract_type: str
+    realism_status: str  # "required" (cost-reimbursement) | "discretionary" (FP)
+    proposed_cost: Decimal
+    probable_cost: Decimal
+    total_adjustment: Decimal
+    adjustment_pct: Decimal
+    element_findings: list[dict] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    source_citation: str = "FAR 15.404-1(d)"
+
+
+def assess_cost_realism(
+    *, contract_type: str, cost_elements: list[dict]
+) -> CostRealismDetermination:
+    """FAR 15.404-1(d): roll a proposal's cost elements up to a PROBABLE COST.
+    Each element carries a proposed and a probable (realism-adjusted) amount; the
+    probable cost = sum of probable amounts, and — for cost-reimbursement contracts
+    — is what the government evaluates, not the proposed cost. Pure; no dated lookup."""
+    cents = Decimal("0.01")
+    required = contract_type in _COST_REIMBURSEMENT_TYPES
+    status = "required" if required else "discretionary"
+
+    findings: list[dict] = []
+    proposed_total = Decimal(0)
+    probable_total = Decimal(0)
+    for el in cost_elements:
+        proposed = Decimal(str(el.get("proposed", "0")))
+        probable = Decimal(str(el.get("probable", el.get("proposed", "0"))))
+        proposed_total += proposed
+        probable_total += probable
+        adj = (probable - proposed).quantize(cents)
+        findings.append({
+            "element": str(el.get("name", "cost element")),
+            "proposed": str(proposed.quantize(cents)),
+            "probable": str(probable.quantize(cents)),
+            "adjustment": str(adj),
+            "adjusted": adj != 0,
+        })
+    proposed_total = proposed_total.quantize(cents)
+    probable_total = probable_total.quantize(cents)
+    adjustment = (probable_total - proposed_total).quantize(cents)
+    pct = ((adjustment / proposed_total * Decimal(100)).quantize(cents)
+           if proposed_total else Decimal("0.00"))
+
+    if required:
+        reasons = [
+            "Cost realism analysis SHALL be performed on cost-reimbursement "
+            "contracts to determine the probable cost (FAR 15.404-1(d)(2))."
+        ]
+    else:
+        reasons = [
+            "Cost realism analysis MAY be used on competitive fixed-price-incentive "
+            "or, in exceptional cases, other fixed-price contracts to assess "
+            "performance risk (FAR 15.404-1(d)(3))."
+        ]
+    reasons.append(
+        f"Probable cost ${probable_total:,} = proposed ${proposed_total:,} "
+        f"{'+' if adjustment >= 0 else '-'} ${abs(adjustment):,} realism adjustment "
+        f"({pct}%)."
+    )
+    caveats = [
+        "The probable cost — not the proposed cost — is used for evaluation to "
+        "determine best value on a cost-reimbursement contract (FAR 15.404-1(d)(2)).",
+        "Each adjustment must be realistic for the work and consistent with the "
+        "offeror's own technical proposal, element by element (FAR 15.404-1(d)(1)).",
+        "Probable cost is the government's best estimate of the most likely cost; "
+        "it does not change the contract's estimated cost or ceiling.",
+    ]
+    return CostRealismDetermination(
+        contract_type=contract_type,
+        realism_status=status,
+        proposed_cost=proposed_total,
+        probable_cost=probable_total,
+        total_adjustment=adjustment,
+        adjustment_pct=pct,
+        element_findings=findings,
+        reasons=reasons,
+        caveats=caveats,
+    )
