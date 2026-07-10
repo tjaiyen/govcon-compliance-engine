@@ -259,6 +259,9 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
         <div><label for="w-mgmt">Management / cost-control %</label><input type="text" id="w-mgmt" class="mono" inputmode="decimal" value="5"></div>
         <div><label for="w-ctr">Contract-type risk %</label><input type="text" id="w-ctr" class="mono" inputmode="decimal" value="5"></div>
       </div>
+      <div class="grid">
+        <div><label for="w-equip">Equipment facilities capital (USD, optional &mdash; 215.404-71-4)</label><input type="text" id="w-equip" class="mono" inputmode="decimal" value="0"></div>
+      </div>
       <div class="check"><input type="checkbox" id="w-techinc"><label for="w-techinc" style="margin:0">Technology incentive (widens the technical range to 7&ndash;11%)</label></div>
       <button type="submit">Compute profit objective</button>
     </form>
@@ -499,7 +502,12 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     var btn = e.target.querySelector('[type="submit"]'); if (btn) btn.disabled = true;
     var body = { cost_base: parseMoney($("w-base").value || "0"), contract_type: $("w-type").value, technical_pct: ($("w-tech").value || "0"), management_pct: ($("w-mgmt").value || "0"), contract_type_risk_pct: ($("w-ctr").value || "0"), technology_incentive: $("w-techinc").checked };
     var host = $("r-wg"); host.hidden = false; host.innerHTML = '<p class="muted">Computing the objective…</p>';
-    post("/api/weighted-guidelines", body).then(function (b) {
+    // optional: compute the 215.404-71-4 facilities-capital profit first and fold it in
+    var equip = parseMoney($("w-equip").value || "0");
+    var fcStep = (parseFloat(equip) > 0)
+      ? post("/api/facilities-capital", { equipment_capital: equip }).then(function (fc) { if (fc && fc.available) body.facilities_capital_profit = fc.facilities_capital_profit; })
+      : Promise.resolve();
+    fcStep.then(function () { return post("/api/weighted-guidelines", body); }).then(function (b) {
       if (!b.available) { host.innerHTML = '<p class="muted">' + esc(b.message || "Could not compute.") + "</p>"; return; }
       var findings = (b.factor_findings || []).map(function (f) {
         return '<div class="watch-item"><span class="kind">' + esc(f.factor) + "</span> " + esc(f.value_pct) + "% " + (f.in_range ? '<span class="tag ok">in range</span>' : '<span class="tag stop">outside ' + esc(f.designated_range) + "</span>") + "</div>";

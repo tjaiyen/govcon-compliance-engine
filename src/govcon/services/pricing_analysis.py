@@ -283,8 +283,9 @@ def compute_weighted_guidelines_profit(
     caveats = [
         "Each factor must be assigned WITHIN its DFARS designated range; a value "
         "outside the range is flagged for justification (DFARS 215.404-71-2/-3).",
-        "Facilities-capital profit (DFARS 215.404-71-4) uses its own DD-1861 "
-        "cost-of-money factors and is taken here as a provided input, NOT computed.",
+        "Facilities-capital profit (DFARS 215.404-71-4) is computed separately by "
+        "compute_facilities_capital_profit (land/buildings 0%, equipment 17.5%) and "
+        "provided here as the facilities-capital component.",
         "This is the objective going into negotiation, not the negotiated profit; "
         "profit is always a negotiated outcome (FAR 15.404-4(a), (b)).",
     ]
@@ -300,6 +301,81 @@ def compute_weighted_guidelines_profit(
         facilities_capital_profit=facilities_capital_profit,
         total_profit_objective=total,
         profit_rate_pct=rate,
+        factor_findings=findings,
+        reasons=reasons,
+        caveats=caveats,
+    )
+
+
+# ------------------------------ DFARS 215.404-71-4: facilities capital employed profit
+# Grounded factors: land 0%, buildings 0%, equipment 17.5% normal (range 10%–25%),
+# applied to the facilities capital EMPLOYED by category (from the DD Form 1861
+# allocation of the CAS 414/417 cost of money). Only equipment earns profit; land
+# and buildings carry a 0% factor. Feeds the DD-1547 profit objective (215.404-71).
+
+_FCE_EQUIPMENT_NORMAL = Decimal("17.5")
+_FCE_EQUIPMENT_RANGE = (Decimal("10"), Decimal("25"))
+
+
+@dataclass
+class FacilitiesCapitalProfit:
+    land_capital: Decimal
+    buildings_capital: Decimal
+    equipment_capital: Decimal
+    equipment_factor_pct: Decimal
+    facilities_capital_profit: Decimal
+    factor_findings: list[dict] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    source_citation: str = "DFARS 215.404-71-4"
+
+
+def compute_facilities_capital_profit(
+    *,
+    equipment_capital: Decimal,
+    land_capital: Decimal = Decimal(0),
+    buildings_capital: Decimal = Decimal(0),
+    equipment_factor_pct: Decimal = _FCE_EQUIPMENT_NORMAL,
+) -> FacilitiesCapitalProfit:
+    """DFARS 215.404-71-4: profit for facilities capital employed. Land and
+    buildings carry a 0% factor; equipment carries a 17.5% normal factor within a
+    10%–25% designated range. Profit = equipment capital × equipment factor. The
+    equipment factor is validated against its range and flagged (never clamped)."""
+    equip_low, equip_high = _FCE_EQUIPMENT_RANGE
+    cents = Decimal("0.01")
+    profit = (equipment_capital * equipment_factor_pct / Decimal(100)).quantize(cents)
+
+    findings = [
+        {"factor": "land", "value_pct": "0", "designated_range": "0% (N/A)", "in_range": True},
+        {"factor": "buildings", "value_pct": "0", "designated_range": "0% (N/A)", "in_range": True},
+        {
+            "factor": "equipment",
+            "value_pct": str(equipment_factor_pct),
+            "designated_range": f"{equip_low}% to {equip_high}%",
+            "in_range": equip_low <= equipment_factor_pct <= equip_high,
+        },
+    ]
+    reasons = [
+        "Land and buildings carry a 0% facilities-capital factor — no profit "
+        "contribution (DFARS 215.404-71-4).",
+        f"Equipment facilities capital ${equipment_capital:,} × {equipment_factor_pct}% "
+        f"= ${profit:,} facilities-capital profit (DFARS 215.404-71-4).",
+    ]
+    caveats = [
+        "Facilities capital employed comes from the DD Form 1861 allocation of the "
+        "CAS 414 / 417 facilities capital cost of money to the contract.",
+        "Feed this amount into the weighted-guidelines objective as the "
+        "facilities-capital profit (DD-1547, DFARS 215.404-71).",
+    ]
+    if not (equip_low <= equipment_factor_pct <= equip_high):
+        caveats.insert(0, f"Equipment factor {equipment_factor_pct}% is OUTSIDE the DFARS 10%–25% designated range — requires documented justification.")
+
+    return FacilitiesCapitalProfit(
+        land_capital=land_capital,
+        buildings_capital=buildings_capital,
+        equipment_capital=equipment_capital,
+        equipment_factor_pct=equipment_factor_pct,
+        facilities_capital_profit=profit,
         factor_findings=findings,
         reasons=reasons,
         caveats=caveats,
