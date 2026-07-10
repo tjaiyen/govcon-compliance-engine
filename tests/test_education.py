@@ -180,8 +180,9 @@ def test_index_has_personas_scenarios_glossary_and_tristate(session_factory):
     assert 'id="scenario-list"' in html and "/api/scenarios" in html
     assert 'id="gloss-list"' in html and "/api/glossary" in html
     # the TINA exceptions are tri-state selects now — no checkbox can express
-    # "not yet evaluated", and the old bool default was an overclaim
-    assert html.count('<option value="">Not evaluated</option>') == 4
+    # "not yet evaluated", and the old bool default was an overclaim. (4 TINA
+    # exceptions + the FAR 15.404-1 adequate-price-competition select = 5.)
+    assert html.count('<option value="">Not evaluated</option>') == 5
     assert 'id="e-apc"' in html and "checkbox" not in html.split('id="e-apc"')[1][:200]
     # still self-contained
     assert "fonts.googleapis" not in html

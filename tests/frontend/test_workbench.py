@@ -89,6 +89,18 @@ def test_draft_narrative_shows_synthetic_banner(page, live_server):
     expect(page.locator("#r-draft")).to_contain_text("SYNTHETIC")
 
 
+def test_far15_card_runs_price_vs_cost_and_subcontract(page, live_server):
+    page.goto(live_server)
+    page.fill("#p-value", "12000000")
+    page.select_option("#p-apc", "true")   # adequate price competition → price analysis
+    page.fill("#p-prime", "100000000")
+    page.fill("#p-sub", "12000000")        # > $10M threshold AND > 10% of prime → required
+    page.click("#f-far15 button[type=submit]")
+    result = page.locator("#r-far15")
+    expect(result).to_contain_text("Price analysis suffices", ignore_case=True)
+    expect(result).to_contain_text("Subcontractor certified data REQUIRED", ignore_case=True)
+
+
 def test_double_submit_button_disables_during_fetch(page, live_server):
     page.goto(live_server)
     page.fill("#c-date", "2026-05-15")

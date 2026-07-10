@@ -71,6 +71,12 @@ class TINARequest(BaseModel):
     tina_exception_waiver_granted: bool | None = None
 
 
+class SubcontractDataRequest(BaseModel):
+    on_date: datetime.date
+    prime_proposed_value: str = Field(..., description="Decimal string — the prime's proposed price")
+    sub_proposed_value: str = Field(..., description="Decimal string — the subcontract's proposed price")
+
+
 #: Reject NaN/Infinity/1e400 as dollar amounts (they break comparisons and can
 #: raise from Decimal.quantize downstream) — shared bound with the AI registry.
 _MAX_MONEY = Decimal("1e15")
@@ -636,6 +642,71 @@ def create_app(session_factory=None, workspace_registry=None, llm_client=None) -
             "reasons": d.reasons,
             "caveats": d.caveats,
             "provenance": d.provenance,
+        }
+
+    @app.post("/api/pricing-analysis")
+    def pricing_analysis(req: TINARequest, session: Session = Depends(get_session)) -> dict:
+        """FAR 15.404-1: price analysis vs cost analysis for a contract action —
+        cost analysis is required exactly when certified cost or pricing data are."""
+        from govcon.services.pricing_analysis import determine_price_or_cost_analysis
+
+        try:
+            action = ContractAction(
+                action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
+                action_date=req.action_date,
+                proposed_value=_money(req.proposed_value),
+                tina_exception_adequate_price_competition=(
+                    req.tina_exception_adequate_price_competition
+                ),
+                tina_exception_commercial_product_service=(
+                    req.tina_exception_commercial_product_service
+                ),
+                tina_exception_prices_set_by_law=req.tina_exception_prices_set_by_law,
+                tina_exception_waiver_granted=req.tina_exception_waiver_granted,
+            )
+            d = determine_price_or_cost_analysis(session, action)
+        except (ValueError, LookupError) as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "analysis_required": d.analysis_required,
+            "certified_data_required": d.certified_data_required,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+            "provenance": d.provenance,
+            "source_citation": d.source_citation,
+        }
+
+    @app.post("/api/subcontract-data")
+    def subcontract_data(
+        req: SubcontractDataRequest, session: Session = Depends(get_session)
+    ) -> dict:
+        """FAR 15.404-3(c)(1): must the prime obtain certified cost or pricing
+        data from a subcontractor? (> dated threshold AND > 10% of prime, or ≥$20M)."""
+        from govcon.services.pricing_analysis import determine_subcontract_certified_data
+
+        try:
+            d = determine_subcontract_certified_data(
+                session,
+                prime_proposed_value=_money(req.prime_proposed_value),
+                sub_proposed_value=_money(req.sub_proposed_value),
+                on_date=req.on_date,
+            )
+        except (ValueError, LookupError) as exc:
+            return {"available": False, "message": str(exc)}
+        return {
+            "available": True,
+            "certified_data_required": d.certified_data_required,
+            "threshold_value": str(d.threshold_value),
+            "prime_proposed_value": str(d.prime_proposed_value),
+            "sub_proposed_value": str(d.sub_proposed_value),
+            "ten_percent_of_prime": str(d.ten_percent_of_prime),
+            "exceeds_threshold": d.exceeds_threshold,
+            "exceeds_ten_percent_of_prime": d.exceeds_ten_percent_of_prime,
+            "meets_absolute_20m": d.meets_absolute_20m,
+            "reasons": d.reasons,
+            "caveats": d.caveats,
+            "source_citation": d.source_citation,
         }
 
     @app.get("/api/threshold")

@@ -217,6 +217,26 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     <div class="result" id="r-contract" aria-live="polite" hidden></div>
   </section>
 
+  <!-- ============ FAR 15.404 pricing analysis ============ -->
+  <section class="card" id="far15-card">
+    <p class="eyebrow-sm">Flow 01b &middot; Contract pricing (FAR 15.4)</p>
+    <h2>Price vs. cost analysis, and subcontract certified data</h2>
+    <p class="sub">FAR 15.404-1 decides whether price analysis suffices or cost analysis is required; 15.404-3(c)(1) decides when a subcontractor must furnish certified cost or pricing data. Both read the same dated threshold. Advisory only.</p>
+    <form id="f-far15">
+      <div class="grid">
+        <div><label for="p-date">Date</label><input type="date" id="p-date" value="2026-07-15" required></div>
+        <div><label for="p-value">Action value (USD) &mdash; 15.404-1</label><input type="text" id="p-value" class="mono" inputmode="decimal" value="12000000"></div>
+        <div><label for="p-apc">Adequate price competition (15.404-1)</label><select id="p-apc"><option value="">Not evaluated</option><option value="true">Yes &mdash; applies</option><option value="false">No &mdash; does not apply</option></select></div>
+      </div>
+      <div class="grid">
+        <div><label for="p-prime">Prime proposed price (USD) &mdash; 15.404-3</label><input type="text" id="p-prime" class="mono" inputmode="decimal" value="100000000"></div>
+        <div><label for="p-sub">Subcontract proposed price (USD) &mdash; 15.404-3</label><input type="text" id="p-sub" class="mono" inputmode="decimal" value="12000000"></div>
+      </div>
+      <button type="submit">Run FAR 15.404 analysis</button>
+    </form>
+    <div class="result" id="r-far15" tabindex="-1" aria-live="polite" hidden></div>
+  </section>
+
   <!-- ============ threshold explorer ============ -->
   <section class="card">
     <p class="eyebrow-sm">Flow 02 · See the rule</p>
@@ -414,6 +434,32 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     Promise.all([post("/api/cas", casBody), post("/api/tina", tinaBody)]).then(function (res) {
       lastContract = { cas: res[0], tina: res[1] };
       renderContract();
+      host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
+    }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine. Please try again.</p>'; })
+      .then(function () { if (btn) btn.disabled = false; });
+  });
+
+  // ---- flow 01b: FAR 15.404 pricing analysis ----
+  function far15AnalysisVerdict(pa) {
+    if (!pa || !pa.available) return '<div class="verdict"><span class="tag info">15.404-1</span><h3>Not available</h3></div><p class="muted">' + esc((pa && pa.message) || "") + "</p>";
+    var tag = pa.analysis_required === "cost_analysis" ? "stop" : (pa.analysis_required === "price_analysis" ? "ok" : "warn");
+    var label = { cost_analysis: "Cost analysis required", price_analysis: "Price analysis suffices", pending: "Pending — TINA exceptions not evaluated" }[pa.analysis_required] || pa.analysis_required;
+    return '<div class="verdict"><span class="tag ' + tag + '">FAR 15.404-1</span><h3>' + esc(label) + "</h3></div>" + teach(pa.reasons, pa.caveats, null);
+  }
+  function far15SubVerdict(sd) {
+    if (!sd || !sd.available) return '<div class="verdict"><span class="tag info">15.404-3</span><h3>Not available</h3></div><p class="muted">' + esc((sd && sd.message) || "") + "</p>";
+    var tag = sd.certified_data_required ? "stop" : "ok";
+    var label = sd.certified_data_required ? "Subcontractor certified data REQUIRED" : "Not required from the subcontractor";
+    return '<div class="verdict"><span class="tag ' + tag + '">FAR 15.404-3</span><h3>' + esc(label) + '</h3><span class="mono muted">threshold in force: $' + esc(sd.threshold_value) + "</span></div>" + teach(sd.reasons, sd.caveats, null);
+  }
+  $("f-far15").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = e.target.querySelector('[type="submit"]'); if (btn) btn.disabled = true;
+    var paBody = { action_date: $("p-date").value, proposed_value: parseMoney($("p-value").value || "0"), tina_exception_adequate_price_competition: tri("p-apc") };
+    var sdBody = { on_date: $("p-date").value, prime_proposed_value: parseMoney($("p-prime").value || "0"), sub_proposed_value: parseMoney($("p-sub").value || "0") };
+    var host = $("r-far15"); host.hidden = false; host.innerHTML = '<p class="muted">Running FAR 15.404 logic…</p>';
+    Promise.all([post("/api/pricing-analysis", paBody), post("/api/subcontract-data", sdBody)]).then(function (res) {
+      host.innerHTML = far15AnalysisVerdict(res[0]) + '<div style="margin-top:18px">' + far15SubVerdict(res[1]) + "</div>";
       host.setAttribute("tabindex", "-1"); host.focus({ preventScroll: true });
     }).catch(function () { host.innerHTML = '<p class="muted">Something went wrong reaching the engine. Please try again.</p>'; })
       .then(function () { if (btn) btn.disabled = false; });

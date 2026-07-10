@@ -119,6 +119,57 @@ def _run_tina(session: Session, inp: dict) -> dict:
     }
 
 
+def _run_pricing_analysis(session: Session, inp: dict) -> dict:
+    from govcon.services.pricing_analysis import determine_price_or_cost_analysis
+
+    action = ContractAction(
+        action_type=ContractActionType.OTHER_NEGOTIATED_ACTION,
+        action_date=_date(inp["action_date"]),
+        proposed_value=_money(inp["proposed_value"]),
+        **{name: inp.get(name) for name in TINA_EXCEPTIONS},
+    )
+    try:
+        d = determine_price_or_cost_analysis(session, action)
+    except LookupError as exc:
+        return {"available": False, "message": str(exc)}
+    return {
+        "available": True,
+        "analysis_required": d.analysis_required,
+        "certified_data_required": d.certified_data_required,
+        "reasons": d.reasons,
+        "caveats": d.caveats,
+        "source_citation": d.source_citation,
+    }
+
+
+def _run_subcontract_data(session: Session, inp: dict) -> dict:
+    from govcon.services.pricing_analysis import determine_subcontract_certified_data
+
+    try:
+        d = determine_subcontract_certified_data(
+            session,
+            prime_proposed_value=_money(inp["prime_proposed_value"]),
+            sub_proposed_value=_money(inp["sub_proposed_value"]),
+            on_date=_date(inp["on_date"]),
+        )
+    except LookupError as exc:
+        return {"available": False, "message": str(exc)}
+    return {
+        "available": True,
+        "certified_data_required": d.certified_data_required,
+        "threshold_value": str(d.threshold_value),
+        "prime_proposed_value": str(d.prime_proposed_value),
+        "sub_proposed_value": str(d.sub_proposed_value),
+        "ten_percent_of_prime": str(d.ten_percent_of_prime),
+        "exceeds_threshold": d.exceeds_threshold,
+        "exceeds_ten_percent_of_prime": d.exceeds_ten_percent_of_prime,
+        "meets_absolute_20m": d.meets_absolute_20m,
+        "reasons": d.reasons,
+        "caveats": d.caveats,
+        "source_citation": d.source_citation,
+    }
+
+
 def _run_threshold(session: Session, inp: dict) -> dict:
     try:
         row = threshold_in_force(session, inp["rule"], _date(inp["on"]))
@@ -267,6 +318,44 @@ TOOLS: dict[str, ToolSpec] = {
             run=_run_tina,
         ),
         ToolSpec(
+            name="determine_price_or_cost_analysis",
+            description=(
+                "FAR 15.404-1: determine whether PRICE analysis suffices or COST analysis is "
+                "required for a contract action. Cost analysis is required exactly when certified "
+                "cost or pricing data are required (TINA applies, no exception); otherwise price "
+                "analysis is the basis. Same tri-state exception fields as TINA."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action_date": {"type": "string", "description": "ISO date of the action"},
+                    "proposed_value": {"type": "string", "description": "Action value in USD, decimal string"},
+                    **_TINA_EXC,
+                },
+                "required": ["action_date", "proposed_value"],
+            },
+            run=_run_pricing_analysis,
+        ),
+        ToolSpec(
+            name="determine_subcontract_certified_data",
+            description=(
+                "FAR 15.404-3(c)(1): determine whether the prime must obtain certified cost or "
+                "pricing data from a subcontractor — required when the subcontract price is BOTH "
+                "more than the dated certified-data threshold AND more than 10% of the prime's "
+                "proposed price, OR $20 million or more."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "on_date": {"type": "string", "description": "ISO date the threshold is read on"},
+                    "prime_proposed_value": {"type": "string", "description": "Prime's proposed price, USD decimal string"},
+                    "sub_proposed_value": {"type": "string", "description": "Subcontract's proposed price, USD decimal string"},
+                },
+                "required": ["on_date", "prime_proposed_value", "sub_proposed_value"],
+            },
+            run=_run_subcontract_data,
+        ),
+        ToolSpec(
             name="threshold_in_force",
             description=(
                 "Look up the dated regulatory threshold in force for a rule on a date, with its "
@@ -355,6 +444,8 @@ TOOLS: dict[str, ToolSpec] = {
 ASK_TOOLS = [
     "determine_cas_coverage",
     "determine_tina_applicability",
+    "determine_price_or_cost_analysis",
+    "determine_subcontract_certified_data",
     "threshold_in_force",
     "run_self_check",
     "reverification_items",
