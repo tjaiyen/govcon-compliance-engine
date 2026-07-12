@@ -7,3 +7,6 @@ __pycache__/
 dist/
 .coverage
 demo_out/
+
+# graphify knowledge-graph output (rebuildable local cache — never commit to the public repo)
+graphify-out/
